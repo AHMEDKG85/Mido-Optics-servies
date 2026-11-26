@@ -46,6 +46,14 @@
           "maxLength": 120,
           "description": "Optical lens type or coating."
         },
+        "framePrice": {
+          "type": "number",
+          "description": "Eyeglass frame price in EGP."
+        },
+        "lensPrice": {
+          "type": "number",
+          "description": "Optical lenses price in EGP."
+        },
         "total": {
           "type": "number",
           "description": "Total order price in EGP."
@@ -294,6 +302,77 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "PriceItem": {
+      "title": "PriceItem",
+      "description": "Optical shop product and service price catalog entry used as a reference when adding customer orders.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "description": "Unique identifier for the price list item."
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "description": "Firebase Auth UID of the shop owner."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Product or service display name."
+        },
+        "category": {
+          "type": "string",
+          "enum": ["frame", "lens", "service"],
+          "description": "Item category: frame, lens, or service."
+        },
+        "price": {
+          "type": "number",
+          "description": "Unit price in EGP."
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 240,
+          "description": "Optional notes or specifications."
+        },
+        "createdAtMs": {
+          "type": "number",
+          "description": "Client creation timestamp in milliseconds."
+        },
+        "updatedAtMs": {
+          "type": "number",
+          "description": "Client last update timestamp in milliseconds."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last update timestamp."
+        }
+      },
+      "required": [
+        "id",
+        "ownerId",
+        "name",
+        "category",
+        "price",
+        "notes",
+        "createdAtMs",
+        "updatedAtMs",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -314,6 +393,12 @@
         "$ref": "#/entities/ShopSettings"
       },
       "description": "Synced shop preferences and WhatsApp automation settings for the authenticated owner."
+    },
+    "/prices/{priceId}": {
+      "schema": {
+        "$ref": "#/entities/PriceItem"
+      },
+      "description": "Private optical shop product and service price catalog, isolated per authenticated shop owner."
     }
   }
 }

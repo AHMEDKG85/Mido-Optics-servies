@@ -1,5 +1,5 @@
 import React from 'react';
-import { Archive, BarChart3, Crown, Glasses, Plus, Send, Users } from 'lucide-react';
+import { Archive, BarChart3, Glasses, Plus, Send, Tag, Users } from 'lucide-react';
 import { AppPage } from '../types/optics';
 
 interface HeaderProps {
@@ -16,9 +16,9 @@ const NAV_ITEMS: Array<{
   icon: React.ComponentType<{ className?: string }>;
 }> = [
   { id: 'customers', label: 'العملاء', shortLabel: 'العملاء', icon: Users },
-  { id: 'loyalty', label: 'نظام الولاء', shortLabel: 'الولاء', icon: Crown },
   { id: 'orders', label: 'متابعة وواتساب', shortLabel: 'واتساب', icon: Send },
   { id: 'archive', label: 'أرشيف الطلبات', shortLabel: 'الأرشيف', icon: Archive },
+  { id: 'prices', label: 'قائمة الأسعار', shortLabel: 'الأسعار', icon: Tag },
   { id: 'stats', label: 'الإحصائيات', shortLabel: 'الإحصائيات', icon: BarChart3 },
 ];
 

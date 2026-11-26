@@ -52,8 +52,8 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'id', 'ownerId', 'date', 'name', 'phone', 'frame', 'lens',
-          'total', 'paid', 'photo', 'r', 'l', 'status', 'hist', 'tok',
-          'pickupDate', 'delivered', 'createdAt', 'updatedAt'
+          'framePrice', 'lensPrice', 'total', 'paid', 'photo', 'r', 'l',
+          'status', 'hist', 'tok', 'pickupDate', 'delivered', 'createdAt', 'updatedAt'
         ])
         && data.id is string && data.id == customerId && data.id.size() <= 64 && isValidId(data.id)
         && data.ownerId is string && data.ownerId == request.auth.uid && isValidId(data.ownerId)
@@ -62,6 +62,8 @@ service cloud.firestore {
         && data.phone is string && data.phone.size() <= 30
         && data.frame is string && data.frame.size() <= 120
         && data.lens is string && data.lens.size() <= 120
+        && (!('framePrice' in data) || (data.framePrice is number && data.framePrice >= 0 && data.framePrice <= 10000000))
+        && (!('lensPrice' in data) || (data.lensPrice is number && data.lensPrice >= 0 && data.lensPrice <= 10000000))
         && data.total is number && data.total >= 0 && data.total <= 10000000
         && data.paid is number && data.paid >= 0 && data.paid <= 10000000
         && data.photo is string && data.photo.size() <= 350000
@@ -125,6 +127,25 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidPriceItem(data, priceId) {
+      return data.keys().hasAll([
+          'id', 'ownerId', 'name', 'category', 'price', 'notes', 'createdAtMs', 'updatedAtMs', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'ownerId', 'name', 'category', 'price', 'notes', 'createdAtMs', 'updatedAtMs', 'createdAt', 'updatedAt'
+        ])
+        && data.id is string && data.id == priceId && data.id.size() <= 64 && isValidId(data.id)
+        && data.ownerId is string && data.ownerId == request.auth.uid && isValidId(data.ownerId)
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 120
+        && data.category is string && data.category in ['frame', 'lens', 'service']
+        && data.price is number && data.price >= 0 && data.price <= 10000000
+        && data.notes is string && data.notes.size() <= 240
+        && data.createdAtMs is number && data.createdAtMs >= 0
+        && data.updatedAtMs is number && data.updatedAtMs >= 0
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     // --- Collection Rules ---
     match /customers/{customerId} {
       allow get: if isSignedIn() && isVerified() && isValidId(customerId) && existing().ownerId == request.auth.uid;
@@ -147,10 +168,10 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && (
-          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'frame', 'lens', 'total', 'paid', 'photo', 'r', 'l', 'pickupDate', 'updatedAt'])
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'frame', 'lens', 'framePrice', 'lensPrice', 'total', 'paid', 'photo', 'r', 'l', 'pickupDate', 'updatedAt'])
           || incoming().diff(existing()).affectedKeys().hasOnly(['status', 'hist', 'updatedAt'])
           || incoming().diff(existing()).affectedKeys().hasOnly(['status', 'hist', 'delivered', 'updatedAt'])
-          || incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'frame', 'lens', 'total', 'paid', 'photo', 'r', 'l', 'pickupDate', 'status', 'hist', 'delivered', 'updatedAt'])
+          || incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'frame', 'lens', 'framePrice', 'lensPrice', 'total', 'paid', 'photo', 'r', 'l', 'pickupDate', 'status', 'hist', 'delivered', 'updatedAt'])
         );
 
       allow delete: if isSignedIn() && isVerified() && isValidId(customerId) && existing().ownerId == request.auth.uid;
@@ -211,6 +232,30 @@ service cloud.firestore {
         && incoming().diff(existing()).affectedKeys().hasOnly(['shopName', 'autoWhatsApp', 'waTemplate', 'publicBaseUrl', 'updatedAt']);
 
       allow delete: if false;
+    }
+
+    match /prices/{priceId} {
+      allow get: if isSignedIn() && isVerified() && isValidId(priceId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && isVerified() && resource.data.ownerId == request.auth.uid;
+
+      allow create: if isSignedIn() && isVerified()
+        && isValidId(priceId)
+        && isValidPriceItem(incoming(), priceId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isSignedIn() && isVerified()
+        && isValidId(priceId)
+        && existing().ownerId == request.auth.uid
+        && isValidPriceItem(incoming(), priceId)
+        && incoming().ownerId == existing().ownerId
+        && incoming().id == existing().id
+        && incoming().createdAtMs == existing().createdAtMs
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'category', 'price', 'notes', 'updatedAtMs', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isVerified() && isValidId(priceId) && existing().ownerId == request.auth.uid;
     }
 
     match /test/connection {

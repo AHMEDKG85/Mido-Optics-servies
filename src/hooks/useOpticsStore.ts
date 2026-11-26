@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   onSnapshot,
   query,
   serverTimestamp,
   setDoc,
+  updateDoc,
   where,
   writeBatch,
 } from 'firebase/firestore';
@@ -15,7 +17,10 @@ import { auth, db, handleFirestoreError, OperationType } from '../lib/firebase';
 import {
   CustomerRecord,
   DEFAULT_WA_TEMPLATE,
+  PendingPriceSyncOp,
   PendingSyncOp,
+  PriceItem,
+  PriceItemCategory,
   ShopSettings,
   SyncState,
 } from '../types/optics';
@@ -23,19 +28,25 @@ import {
   advanceHist,
   clampNumber,
   generateCustomerId,
+  generatePriceItemId,
   generateToken,
   normalizeCustomerRecord,
+  normalizePriceCategory,
+  normalizePriceItem,
   SAMPLE_CUSTOMERS,
   sanitizeEyeTuple,
   sanitizeId,
   sanitizePickupDate,
   sanitizeToken,
+  STARTER_PRICE_ITEMS,
 } from '../utils/optics';
 import { useOnlineStatus } from './useOnlineStatus';
 
 const STORAGE_CUSTOMERS_KEY = 'mido_customers_v2';
 const LEGACY_CUSTOMERS_KEY = 'mido_customers';
 const STORAGE_PENDING_KEY = 'mido_pending_ops_v1';
+const STORAGE_PRICES_KEY = 'mido_prices_v1';
+const STORAGE_PENDING_PRICES_KEY = 'mido_pending_price_ops_v1';
 const STORAGE_SETTINGS_KEY = 'mido_settings_v1';
 
 const DEFAULT_SETTINGS: ShopSettings = {
@@ -113,12 +124,56 @@ function writeLocalSettings(settings: ShopSettings): void {
   }
 }
 
+function readLocalPriceItems(): PriceItem[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_PRICES_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map(normalizePriceItem)
+      .filter((x): x is PriceItem => x !== null)
+      .sort((a, b) => b.updatedAtMs - a.updatedAtMs);
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalPriceItems(list: PriceItem[]): void {
+  try {
+    localStorage.setItem(STORAGE_PRICES_KEY, JSON.stringify(list));
+  } catch {
+    // Ignore storage quota errors gracefully
+  }
+}
+
+function readPendingPriceOps(): PendingPriceSyncOp[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_PENDING_PRICES_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writePendingPriceOps(ops: PendingPriceSyncOp[]): void {
+  try {
+    localStorage.setItem(STORAGE_PENDING_PRICES_KEY, JSON.stringify(ops));
+  } catch {
+    // Ignore storage quota errors gracefully
+  }
+}
+
 export interface CustomerInput {
   id?: string;
   name: string;
   phone: string;
   frame: string;
   lens: string;
+  framePrice?: number;
+  lensPrice?: number;
   total: number;
   paid: number;
   photo: string;
@@ -127,17 +182,30 @@ export interface CustomerInput {
   pickupDate: string;
 }
 
+export interface PriceItemInput {
+  id?: string;
+  name: string;
+  category: PriceItemCategory;
+  price: number;
+  notes?: string;
+}
+
 export function useOpticsStore() {
   const isOnline = useOnlineStatus();
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [customers, setCustomers] = useState<CustomerRecord[]>(() => readLocalCustomers());
   const [pendingOps, setPendingOps] = useState<PendingSyncOp[]>(() => readPendingOps());
+  const [priceItems, setPriceItems] = useState<PriceItem[]>(() => readLocalPriceItems());
+  const [pendingPriceOps, setPendingPriceOps] = useState<PendingPriceSyncOp[]>(() =>
+    readPendingPriceOps()
+  );
   const [settings, setSettings] = useState<ShopSettings>(() => readLocalSettings());
   const [firestorePendingWrites, setFirestorePendingWrites] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
 
   const knownServerCustomerIds = useRef<Set<string>>(new Set());
+  const knownServerPriceIds = useRef<Set<string>>(new Set());
   const isFlushing = useRef(false);
 
   // Persist local mirror whenever customers/pendingOps/settings change
@@ -148,6 +216,14 @@ export function useOpticsStore() {
   useEffect(() => {
     writePendingOps(pendingOps);
   }, [pendingOps]);
+
+  useEffect(() => {
+    writeLocalPriceItems(priceItems);
+  }, [priceItems]);
+
+  useEffect(() => {
+    writePendingPriceOps(pendingPriceOps);
+  }, [pendingPriceOps]);
 
   useEffect(() => {
     writeLocalSettings(settings);
@@ -183,6 +259,8 @@ export function useOpticsStore() {
         }
       }
 
+      const safeFramePrice = clampNumber(record.framePrice);
+      const safeLensPrice = clampNumber(record.lensPrice);
       const safeTotal = clampNumber(record.total);
       const safePaid = clampNumber(record.paid);
       const safePhoto =
@@ -217,6 +295,8 @@ export function useOpticsStore() {
           phone: safePhone,
           frame: safeFrame,
           lens: safeLens,
+          framePrice: safeFramePrice,
+          lensPrice: safeLensPrice,
           total: safeTotal,
           paid: safePaid,
           photo: safePhoto,
@@ -237,6 +317,8 @@ export function useOpticsStore() {
           phone: safePhone,
           frame: safeFrame,
           lens: safeLens,
+          framePrice: safeFramePrice,
+          lensPrice: safeLensPrice,
           total: safeTotal,
           paid: safePaid,
           photo: safePhoto,
@@ -325,10 +407,77 @@ export function useOpticsStore() {
     }
   }, []);
 
+  const commitPriceUpsertToFirestore = useCallback(
+    async (item: PriceItem, uid: string) => {
+      const id = sanitizeId(item.id, 'p');
+      const priceRef = doc(db, 'prices', id);
+
+      let existsOnServer = knownServerPriceIds.current.has(id);
+      if (!existsOnServer) {
+        try {
+          const snap = await getDoc(priceRef);
+          existsOnServer = snap.exists();
+          if (existsOnServer) {
+            knownServerPriceIds.current.add(id);
+          }
+        } catch {
+          existsOnServer = false;
+        }
+      }
+
+      const safeName = item.name.trim().slice(0, 120) || 'صنف';
+      const safeCategory = normalizePriceCategory(item.category);
+      const safePrice = clampNumber(item.price);
+      const safeNotes = (item.notes || '').trim().slice(0, 240);
+      const safeCreatedAtMs = Math.max(0, Math.trunc(item.createdAtMs || Date.now()));
+      const safeUpdatedAtMs = Math.max(0, Math.trunc(item.updatedAtMs || Date.now()));
+
+      try {
+        if (existsOnServer) {
+          await updateDoc(priceRef, {
+            name: safeName,
+            category: safeCategory,
+            price: safePrice,
+            notes: safeNotes,
+            updatedAtMs: safeUpdatedAtMs,
+            updatedAt: serverTimestamp(),
+          });
+        } else {
+          await setDoc(priceRef, {
+            id,
+            ownerId: uid,
+            name: safeName,
+            category: safeCategory,
+            price: safePrice,
+            notes: safeNotes,
+            createdAtMs: safeCreatedAtMs,
+            updatedAtMs: safeUpdatedAtMs,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        }
+        knownServerPriceIds.current.add(id);
+      } catch (err) {
+        handleFirestoreError(err, OperationType.WRITE, `prices/${id}`);
+      }
+    },
+    []
+  );
+
+  const commitPriceDeleteToFirestore = useCallback(async (priceId: string) => {
+    const id = sanitizeId(priceId, 'p');
+    try {
+      await deleteDoc(doc(db, 'prices', id));
+      knownServerPriceIds.current.delete(id);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `prices/${id}`);
+    }
+  }, []);
+
   // Flush queued offline/pre-login ops when authenticated & online
   const flushPendingOps = useCallback(async () => {
     if (!user || !user.emailVerified || !isOnline || isFlushing.current) return;
-    if (pendingOps.length === 0) return;
+    if (pendingOps.length === 0 && pendingPriceOps.length === 0) return;
 
     isFlushing.current = true;
     try {
@@ -343,7 +492,25 @@ export function useOpticsStore() {
           succeededIds.add(op.id);
         }
       }
-      setPendingOps((prev) => prev.filter((op) => !succeededIds.has(op.id)));
+      if (succeededIds.size > 0) {
+        setPendingOps((prev) => prev.filter((op) => !succeededIds.has(op.id)));
+      }
+
+      const priceOpsToRun = [...pendingPriceOps];
+      const succeededPriceOpIds = new Set<string>();
+      for (const op of priceOpsToRun) {
+        if (op.type === 'upsert' && op.item) {
+          await commitPriceUpsertToFirestore(op.item, user.uid);
+          succeededPriceOpIds.add(op.id);
+        } else if (op.type === 'delete') {
+          await commitPriceDeleteToFirestore(op.priceId);
+          succeededPriceOpIds.add(op.id);
+        }
+      }
+      if (succeededPriceOpIds.size > 0) {
+        setPendingPriceOps((prev) => prev.filter((op) => !succeededPriceOpIds.has(op.id)));
+      }
+
       setSyncError(null);
     } catch (err) {
       setSyncError(err instanceof Error ? err.message : 'تعذر المزامنة');
@@ -354,9 +521,12 @@ export function useOpticsStore() {
     user,
     isOnline,
     pendingOps,
+    pendingPriceOps,
     settings.shopName,
     commitUpsertToFirestore,
     commitDeleteToFirestore,
+    commitPriceUpsertToFirestore,
+    commitPriceDeleteToFirestore,
   ]);
 
   useEffect(() => {
@@ -367,6 +537,7 @@ export function useOpticsStore() {
   useEffect(() => {
     if (!authReady || !user || !user.emailVerified) {
       knownServerCustomerIds.current.clear();
+      knownServerPriceIds.current.clear();
       setFirestorePendingWrites(false);
       return;
     }
@@ -479,9 +650,88 @@ export function useOpticsStore() {
       }
     );
 
+    const pricesQuery = query(collection(db, 'prices'), where('ownerId', '==', user.uid));
+    let isFirstPriceSnapshot = true;
+
+    const unsubPrices = onSnapshot(
+      pricesQuery,
+      { includeMetadataChanges: true },
+      (snapshot) => {
+        setSyncError(null);
+        const serverPrices: PriceItem[] = [];
+        const nextKnownPrices = new Set<string>();
+
+        for (const docSnap of snapshot.docs) {
+          const normalized = normalizePriceItem(docSnap.data());
+          if (normalized) {
+            serverPrices.push(normalized);
+            nextKnownPrices.add(normalized.id);
+          }
+        }
+
+        knownServerPriceIds.current = nextKnownPrices;
+
+        if (isFirstPriceSnapshot && serverPrices.length === 0) {
+          const localOnlyPrices = readLocalPriceItems();
+          if (localOnlyPrices.length > 0) {
+            isFirstPriceSnapshot = false;
+            setPendingPriceOps((prev) => {
+              const existingPriceIds = new Set(prev.map((p) => p.priceId));
+              const additions: PendingPriceSyncOp[] = localOnlyPrices
+                .filter((item) => !existingPriceIds.has(item.id))
+                .map((item) => ({
+                  id: `migrate_price_${item.id}_${Date.now()}`,
+                  type: 'upsert',
+                  priceId: item.id,
+                  item: { ...item, ownerId: user.uid },
+                  queuedAt: Date.now(),
+                }));
+              return additions.length ? [...prev, ...additions] : prev;
+            });
+            return;
+          }
+        }
+        isFirstPriceSnapshot = false;
+
+        const currentPendingPrices = readPendingPriceOps();
+        const pendingDeletes = new Set(
+          currentPendingPrices.filter((op) => op.type === 'delete').map((op) => op.priceId)
+        );
+        const pendingUpserts = new Map<string, PriceItem>();
+        for (const op of currentPendingPrices) {
+          if (op.type === 'upsert' && op.item) {
+            pendingUpserts.set(op.priceId, op.item);
+          }
+        }
+
+        const mergedPrices = new Map<string, PriceItem>();
+        for (const item of serverPrices) {
+          if (!pendingDeletes.has(item.id)) {
+            mergedPrices.set(item.id, item);
+          }
+        }
+        for (const [id, item] of pendingUpserts.entries()) {
+          mergedPrices.set(id, item);
+        }
+
+        setPriceItems(
+          Array.from(mergedPrices.values()).sort((a, b) => b.updatedAtMs - a.updatedAtMs)
+        );
+      },
+      (err) => {
+        setSyncError(err.message);
+        try {
+          handleFirestoreError(err, OperationType.LIST, 'prices');
+        } catch {
+          // Structured error logged in handleFirestoreError; keep app running offline-first
+        }
+      }
+    );
+
     return () => {
       unsubCustomers();
       unsubSettings();
+      unsubPrices();
     };
   }, [authReady, user]);
 
@@ -528,6 +778,8 @@ export function useOpticsStore() {
             phone: input.phone.trim().slice(0, 30),
             frame: input.frame.trim().slice(0, 120),
             lens: input.lens.trim().slice(0, 120),
+            framePrice: clampNumber(input.framePrice),
+            lensPrice: clampNumber(input.lensPrice),
             total: clampNumber(input.total),
             paid: clampNumber(input.paid),
             photo: input.photo || '',
@@ -543,6 +795,8 @@ export function useOpticsStore() {
             phone: input.phone.trim().slice(0, 30),
             frame: input.frame.trim().slice(0, 120),
             lens: input.lens.trim().slice(0, 120),
+            framePrice: clampNumber(input.framePrice),
+            lensPrice: clampNumber(input.lensPrice),
             total: clampNumber(input.total),
             paid: clampNumber(input.paid),
             photo: input.photo || '',
@@ -718,13 +972,128 @@ export function useOpticsStore() {
     [settings, user]
   );
 
+  const queueOrSyncPriceUpsert = useCallback(
+    (item: PriceItem) => {
+      if (user && user.emailVerified) {
+        if (isOnline) {
+          void commitPriceUpsertToFirestore(item, user.uid).catch((err) => {
+            setSyncError(err instanceof Error ? err.message : 'تعذر المزامنة');
+          });
+        } else {
+          void commitPriceUpsertToFirestore(item, user.uid).catch(() => {});
+        }
+        return;
+      }
+
+      setPendingPriceOps((prev) => [
+        ...prev.filter((op) => op.priceId !== item.id),
+        {
+          id: `price_op_${item.id}_${Date.now()}`,
+          type: 'upsert',
+          priceId: item.id,
+          item,
+          queuedAt: Date.now(),
+        },
+      ]);
+    },
+    [user, isOnline, commitPriceUpsertToFirestore]
+  );
+
+  const savePriceItem = useCallback(
+    (input: PriceItemInput): { item: PriceItem; isNew: boolean } => {
+      const existing = input.id ? priceItems.find((p) => p.id === input.id) : undefined;
+      const isNew = !existing;
+      const nowMs = Date.now();
+
+      const item: PriceItem = existing
+        ? {
+            ...existing,
+            name: input.name.trim().slice(0, 120),
+            category: normalizePriceCategory(input.category),
+            price: clampNumber(input.price),
+            notes: (input.notes || '').trim().slice(0, 240),
+            updatedAtMs: nowMs,
+          }
+        : {
+            id: generatePriceItemId(),
+            ownerId: user?.uid,
+            name: input.name.trim().slice(0, 120),
+            category: normalizePriceCategory(input.category),
+            price: clampNumber(input.price),
+            notes: (input.notes || '').trim().slice(0, 240),
+            createdAtMs: nowMs,
+            updatedAtMs: nowMs,
+          };
+
+      setPriceItems((prev) => {
+        if (existing) {
+          return prev
+            .map((p) => (p.id === item.id ? item : p))
+            .sort((a, b) => b.updatedAtMs - a.updatedAtMs);
+        }
+        return [item, ...prev];
+      });
+
+      queueOrSyncPriceUpsert(item);
+      return { item, isNew };
+    },
+    [priceItems, user, queueOrSyncPriceUpsert]
+  );
+
+  const deletePriceItem = useCallback(
+    (priceId: string) => {
+      setPriceItems((prev) => prev.filter((p) => p.id !== priceId));
+
+      if (user && user.emailVerified) {
+        void commitPriceDeleteToFirestore(priceId).catch((err) => {
+          setSyncError(err instanceof Error ? err.message : 'تعذر الحذف من السحابة');
+        });
+      } else {
+        setPendingPriceOps((prev) => [
+          ...prev.filter((op) => op.priceId !== priceId),
+          {
+            id: `del_price_${priceId}_${Date.now()}`,
+            type: 'delete',
+            priceId,
+            queuedAt: Date.now(),
+          },
+        ]);
+      }
+    },
+    [user, commitPriceDeleteToFirestore]
+  );
+
+  const loadStarterPriceItems = useCallback((): number => {
+    const existingNames = new Set(
+      priceItems.map((item) => `${item.category}::${item.name.trim().toLowerCase()}`)
+    );
+    const additions = STARTER_PRICE_ITEMS.filter(
+      (item) => !existingNames.has(`${item.category}::${item.name.trim().toLowerCase()}`)
+    ).map((item) => ({
+      ...item,
+      ownerId: user?.uid,
+    }));
+
+    if (additions.length === 0) return 0;
+
+    setPriceItems((prev) =>
+      [...additions, ...prev].sort((a, b) => b.updatedAtMs - a.updatedAtMs)
+    );
+    for (const item of additions) {
+      queueOrSyncPriceUpsert(item);
+    }
+    return additions.length;
+  }, [priceItems, user, queueOrSyncPriceUpsert]);
+
   const syncState: SyncState = useMemo(() => {
     if (syncError) return 'error';
     if (!isOnline) return 'offline';
     if (!user) return 'local-only';
-    if (firestorePendingWrites || pendingOps.length > 0) return 'syncing';
+    if (firestorePendingWrites || pendingOps.length > 0 || pendingPriceOps.length > 0) {
+      return 'syncing';
+    }
     return 'synced';
-  }, [syncError, isOnline, user, firestorePendingWrites, pendingOps.length]);
+  }, [syncError, isOnline, user, firestorePendingWrites, pendingOps.length, pendingPriceOps.length]);
 
   return {
     user,
@@ -732,9 +1101,10 @@ export function useOpticsStore() {
     isOnline,
     syncState,
     syncError,
-    pendingCount: pendingOps.length,
+    pendingCount: pendingOps.length + pendingPriceOps.length,
     firestorePendingWrites,
     customers,
+    priceItems,
     settings,
     saveCustomer,
     updateOrderStage,
@@ -743,6 +1113,9 @@ export function useOpticsStore() {
     deleteCustomer,
     importCustomers,
     loadSampleData,
+    savePriceItem,
+    deletePriceItem,
+    loadStarterPriceItems,
     updateSettings,
     flushPendingOps,
   };

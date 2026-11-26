@@ -23,6 +23,7 @@ interface CustomersPageProps {
   onAddCustomer: () => void;
   onEditCustomer: (customer: CustomerRecord) => void;
   onDeleteCustomer: (id: string) => void;
+  onChangeStage: (customerId: string, nextStage: number) => void;
   onOpenOrder: (customer: CustomerRecord) => void;
   onOpenInvoice: (customer: CustomerRecord) => void;
   onImportCustomers: (rawList: unknown[]) => number;
@@ -35,6 +36,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
   onAddCustomer,
   onEditCustomer,
   onDeleteCustomer,
+  onChangeStage,
   onOpenOrder,
   onOpenInvoice,
   onImportCustomers,
@@ -265,20 +267,29 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
                         </div>
                       </td>
                       <td className="px-2.5 py-3 text-xs font-medium whitespace-nowrap">
-                        <div className="space-y-0.5">
-                          <span
-                            className={
-                              c.delivered
-                                ? 'text-emerald-700 dark:text-emerald-400 font-bold'
-                                : c.status === 4
-                                ? 'text-emerald-700 dark:text-emerald-400 font-bold'
-                                : 'text-[#8f6c1e] dark:text-[#e8cf8b]'
-                            }
-                          >
-                            {c.delivered
-                              ? 'تم استلام النظارة'
-                              : ORDER_STAGES[c.status] || ORDER_STAGES[0]}
-                          </span>
+                        <div className="space-y-1">
+                          {c.delivered ? (
+                            <span className="text-emerald-700 dark:text-emerald-400 font-bold">
+                              تم استلام النظارة
+                            </span>
+                          ) : (
+                            <select
+                              aria-label={`تغيير حالة ${c.name}`}
+                              value={Math.max(0, Math.min(4, c.status || 0))}
+                              onChange={(e) => onChangeStage(c.id, Number(e.target.value))}
+                              className={`min-h-[32px] px-2 py-1 rounded-lg border text-xs font-semibold bg-white dark:bg-[#0d1722] cursor-pointer focus:outline-none focus:border-[#c9a24b] ${
+                                c.status === 4
+                                  ? 'border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-400'
+                                  : 'border-slate-200 dark:border-slate-700 text-[#8f6c1e] dark:text-[#e8cf8b]'
+                              }`}
+                            >
+                              {ORDER_STAGES.map((stageLabel, idx) => (
+                                <option key={stageLabel} value={idx}>
+                                  {stageLabel}
+                                </option>
+                              ))}
+                            </select>
+                          )}
                           {c.pickupDate && (
                             <div className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
                               التسليم: {formatArabicPickupDate(c.pickupDate)}
@@ -373,7 +384,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
                     </div>
                   </div>
 
-                  <div className="text-xs text-slate-600 dark:text-slate-300 flex flex-wrap gap-x-3 gap-y-1">
+                  <div className="text-xs text-slate-600 dark:text-slate-300 flex flex-wrap items-center gap-x-3 gap-y-1.5">
                     <span>الشمبر: {c.frame || '—'}</span>
                     <span>·</span>
                     <span>العدسات: {c.lens || '—'}</span>
@@ -385,13 +396,32 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
                         </span>
                       </>
                     )}
-                    {c.delivered && (
+                    {c.delivered ? (
                       <>
                         <span>·</span>
                         <span className="text-emerald-700 dark:text-emerald-400 font-bold">
                           تم التسليم
                         </span>
                       </>
+                    ) : (
+                      <div className="w-full pt-1">
+                        <select
+                          aria-label={`تغيير حالة ${c.name}`}
+                          value={Math.max(0, Math.min(4, c.status || 0))}
+                          onChange={(e) => onChangeStage(c.id, Number(e.target.value))}
+                          className={`w-full min-h-[38px] px-2.5 py-1.5 rounded-xl border text-xs font-bold bg-[#f3f9fd] dark:bg-[#0d1722] cursor-pointer focus:outline-none focus:border-[#c9a24b] ${
+                            c.status === 4
+                              ? 'border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-400'
+                              : 'border-slate-200 dark:border-slate-700 text-[#8f6c1e] dark:text-[#e8cf8b]'
+                          }`}
+                        >
+                          {ORDER_STAGES.map((stageLabel, idx) => (
+                            <option key={stageLabel} value={idx}>
+                              الحالة: {stageLabel}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     )}
                   </div>
 

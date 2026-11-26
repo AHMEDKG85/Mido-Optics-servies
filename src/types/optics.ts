@@ -8,6 +8,8 @@ export interface CustomerRecord {
   phone: string;
   frame: string;
   lens: string;
+  framePrice?: number;
+  lensPrice?: number;
   total: number;
   paid: number;
   photo: string;
@@ -46,6 +48,25 @@ export interface ShopSettings {
   publicBaseUrl: string;
 }
 
+export type PriceItemCategory = 'frame' | 'lens' | 'service';
+
+export const PRICE_CATEGORY_LABELS: Record<PriceItemCategory, string> = {
+  frame: 'شمبر',
+  lens: 'عدسات',
+  service: 'خدمات وإصلاحات',
+};
+
+export interface PriceItem {
+  id: string;
+  ownerId?: string;
+  name: string;
+  category: PriceItemCategory;
+  price: number;
+  notes: string;
+  createdAtMs: number;
+  updatedAtMs: number;
+}
+
 export interface PendingSyncOp {
   id: string;
   type: 'upsert' | 'delete';
@@ -55,7 +76,15 @@ export interface PendingSyncOp {
   queuedAt: number;
 }
 
-export type AppPage = 'customers' | 'loyalty' | 'orders' | 'archive' | 'stats' | 'track';
+export interface PendingPriceSyncOp {
+  id: string;
+  type: 'upsert' | 'delete';
+  priceId: string;
+  item?: PriceItem;
+  queuedAt: number;
+}
+
+export type AppPage = 'customers' | 'orders' | 'archive' | 'prices' | 'stats' | 'track';
 
 export type SyncState = 'synced' | 'syncing' | 'offline' | 'local-only' | 'error';
 

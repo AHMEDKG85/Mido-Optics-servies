@@ -7,24 +7,21 @@ import {
   LensSheet,
   ORDER_STAGES,
   PickupReminderSummary,
+  PriceItem,
+  PriceItemCategory,
 } from '../types/optics';
-
-export interface LoyaltyEntry {
-  key: string;
-  name: string;
-  phone: string;
-  visits: number;
-  paid: number;
-  points: number;
-  tier: 'برونزي' | 'فضي' | 'ذهبي';
-  tierColor: string;
-  rewardText: string;
-}
 
 export function clampNumber(value: unknown, min = 0, max = 10_000_000): number {
   const num = Number(value);
   if (!Number.isFinite(num)) return min;
   return Math.min(max, Math.max(min, num));
+}
+
+export function calculateAutoTotal(
+  framePrice: number | string | undefined,
+  lensPrice: number | string | undefined
+): number {
+  return Math.round((clampNumber(framePrice) + clampNumber(lensPrice)) * 100) / 100;
 }
 
 export function calculateRemaining(total: number, paid: number): number {
@@ -133,12 +130,89 @@ export function renderWhatsAppMessage(params: {
     .replaceAll('{shop}', shopName);
 }
 
+export function renderReadyPickupMessage(params: {
+  customer: Pick<CustomerRecord, 'name' | 'frame' | 'lens' | 'total' | 'paid'>;
+  trackingUrl: string;
+  shopName?: string;
+}): string {
+  const shop = params.shopName || 'Mido Optics';
+  const remaining = calculateRemaining(params.customer.total, params.customer.paid);
+  const details = [params.customer.frame, params.customer.lens].filter(Boolean).join(' · ');
+  const detailsLine = details ? `\nتفاصيل الطلب: ${details}.` : '';
+  const paymentLine =
+    remaining > 0
+      ? `\nالمبلغ المتبقي عند الاستلام: ${remaining} جنيه.`
+      : params.customer.total > 0
+      ? '\nالمبلغ مسدد بالكامل (خالص).'
+      : '';
+  return `أهلاً ${params.customer.name || 'عميلنا العزيز'}، يسعدنا إبلاغك بأن نظارتك في ${shop} أصبحت جاهزة للاستلام الآن!${detailsLine}\nمن فضلك توجّه إلى الفرع لاستلام نظارتك.${paymentLine}\nرابط المتابعة:\n${params.trackingUrl}`;
+}
+
+export function buildSmsUrl(phone: string, message: string): string {
+  const cleanDigits = formatEgyptianWhatsAppPhone(phone);
+  const recipient = cleanDigits ? `+${cleanDigits}` : '';
+  return `sms:${recipient}?body=${encodeURIComponent(message)}`;
+}
+
+export function buildStageWhatsAppDispatch(params: {
+  customer: Pick<
+    CustomerRecord,
+    'name' | 'phone' | 'frame' | 'lens' | 'total' | 'paid' | 'status'
+  >;
+  trackingUrl: string;
+  template?: string;
+  shopName?: string;
+  forceReadyMessage?: boolean;
+}): {
+  message: string;
+  waUrl: string;
+  smsUrl: string;
+  isReadyNotification: boolean;
+} {
+  const isReadyNotification = Boolean(
+    params.forceReadyMessage || params.customer.status === 4
+  );
+  const message = isReadyNotification
+    ? renderReadyPickupMessage({
+        customer: params.customer,
+        trackingUrl: params.trackingUrl,
+        shopName: params.shopName,
+      })
+    : renderWhatsAppMessage({
+        template: params.template,
+        customer: params.customer,
+        trackingUrl: params.trackingUrl,
+        shopName: params.shopName,
+      });
+  const phone = formatEgyptianWhatsAppPhone(params.customer.phone);
+  const encoded = encodeURIComponent(message);
+  const waUrl = phone ? `https://wa.me/${phone}?text=${encoded}` : `https://wa.me/?text=${encoded}`;
+  const smsUrl = buildSmsUrl(params.customer.phone, message);
+
+  return {
+    message,
+    waUrl,
+    smsUrl,
+    isReadyNotification,
+  };
+}
+
 export function buildWhatsAppUrl(params: {
   customer: Pick<CustomerRecord, 'name' | 'phone' | 'frame' | 'lens' | 'total' | 'paid' | 'status'>;
   trackingUrl: string;
   template?: string;
   shopName?: string;
+  preferReadyMessage?: boolean;
 }): string {
+  if (params.preferReadyMessage !== false && params.customer.status === 4) {
+    return buildStageWhatsAppDispatch({
+      customer: params.customer,
+      trackingUrl: params.trackingUrl,
+      template: params.template,
+      shopName: params.shopName,
+      forceReadyMessage: true,
+    }).waUrl;
+  }
   const phone = formatEgyptianWhatsAppPhone(params.customer.phone);
   const text = renderWhatsAppMessage(params);
   const encoded = encodeURIComponent(text);
@@ -146,49 +220,6 @@ export function buildWhatsAppUrl(params: {
     return `https://wa.me/?text=${encoded}`;
   }
   return `https://wa.me/${phone}?text=${encoded}`;
-}
-
-export function calculateLoyaltySummary(customers: CustomerRecord[]): LoyaltyEntry[] {
-  const map = new Map<string, { name: string; phone: string; visits: number; paid: number }>();
-  for (const c of customers) {
-    const key = (c.phone || '').trim() || c.name.trim();
-    if (!key) continue;
-    const prev = map.get(key);
-    if (prev) {
-      prev.visits += 1;
-      prev.paid += clampNumber(c.paid);
-      if (c.name && !prev.name) prev.name = c.name;
-    } else {
-      map.set(key, {
-        name: c.name,
-        phone: c.phone,
-        visits: 1,
-        paid: clampNumber(c.paid),
-      });
-    }
-  }
-
-  return Array.from(map.entries())
-    .map(([key, item]) => {
-      const points = Math.floor(item.paid / 100);
-      const tier: LoyaltyEntry['tier'] =
-        points >= 25 ? 'ذهبي' : points >= 10 ? 'فضي' : 'برونزي';
-      const tierColor =
-        points >= 25 ? '#c99312' : points >= 10 ? '#64748b' : '#a35d28';
-      const rewardAmount = Math.floor(points / 10) * 50;
-      return {
-        key,
-        name: item.name,
-        phone: item.phone,
-        visits: item.visits,
-        paid: item.paid,
-        points,
-        tier,
-        tierColor,
-        rewardText: rewardAmount > 0 ? `خصم ${rewardAmount} جنيه` : '—',
-      };
-    })
-    .sort((a, b) => b.points - a.points);
 }
 
 export function sanitizeId(rawId: unknown, fallbackPrefix = 'c'): string {
@@ -317,6 +348,8 @@ export function normalizeCustomerRecord(raw: unknown): CustomerRecord | null {
     phone: String(obj.phone ?? '').trim().slice(0, 30),
     frame: String(obj.frame ?? '').trim().slice(0, 120),
     lens: String(obj.lens ?? '').trim().slice(0, 120),
+    framePrice: clampNumber(obj.framePrice),
+    lensPrice: clampNumber(obj.lensPrice),
     total: clampNumber(obj.total),
     paid: clampNumber(obj.paid),
     photo: safePhoto,
@@ -1116,5 +1149,137 @@ export function filterArchivedOrders(
     })
     .sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
 }
+
+export function generatePriceItemId(): string {
+  return `p_${Date.now()}_${generateToken(4)}`;
+}
+
+export function normalizePriceCategory(raw: unknown): PriceItemCategory {
+  if (raw === 'frame' || raw === 'lens' || raw === 'service') {
+    return raw;
+  }
+  return 'frame';
+}
+
+export function normalizePriceItem(raw: unknown): PriceItem | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  const name = String(obj.name ?? '').trim().slice(0, 120);
+  if (!name) return null;
+
+  const createdAtMs =
+    typeof obj.createdAtMs === 'number' && Number.isFinite(obj.createdAtMs) && obj.createdAtMs >= 0
+      ? Math.trunc(obj.createdAtMs)
+      : Date.now();
+  const updatedAtMs =
+    typeof obj.updatedAtMs === 'number' && Number.isFinite(obj.updatedAtMs) && obj.updatedAtMs >= 0
+      ? Math.trunc(obj.updatedAtMs)
+      : createdAtMs;
+
+  return {
+    id: sanitizeId(obj.id, 'p'),
+    ownerId: obj.ownerId ? String(obj.ownerId).slice(0, 128) : undefined,
+    name,
+    category: normalizePriceCategory(obj.category),
+    price: clampNumber(obj.price),
+    notes: String(obj.notes ?? '').trim().slice(0, 240),
+    createdAtMs,
+    updatedAtMs,
+  };
+}
+
+export function filterPriceItems(
+  items: PriceItem[],
+  category: PriceItemCategory | 'all' = 'all',
+  query = ''
+): PriceItem[] {
+  const trimmed = query.trim().toLowerCase();
+  return items
+    .filter((item) => {
+      if (category !== 'all' && item.category !== category) return false;
+      if (!trimmed) return true;
+      return (
+        item.name.toLowerCase().includes(trimmed) ||
+        item.notes.toLowerCase().includes(trimmed)
+      );
+    })
+    .sort((a, b) => b.updatedAtMs - a.updatedAtMs);
+}
+
+export const STARTER_PRICE_ITEMS: PriceItem[] = [
+  {
+    id: 'starter_frame_tr90',
+    name: 'شمبر TR90 مرن ضد الكسر',
+    category: 'frame',
+    price: 450,
+    notes: 'خفيف الوزن ومناسب للاستخدام اليومي',
+    createdAtMs: 1764000001000,
+    updatedAtMs: 1764000001000,
+  },
+  {
+    id: 'starter_frame_metal',
+    name: 'شمبر معدن كلاسيك',
+    category: 'frame',
+    price: 650,
+    notes: 'وسادات أنف سيليكون مريحة',
+    createdAtMs: 1764000002000,
+    updatedAtMs: 1764000002000,
+  },
+  {
+    id: 'starter_frame_acetate',
+    name: 'شمبر أسيتات براند',
+    category: 'frame',
+    price: 1200,
+    notes: 'خامة فاخرة مع جراب ومنديل',
+    createdAtMs: 1764000003000,
+    updatedAtMs: 1764000003000,
+  },
+  {
+    id: 'starter_lens_ar',
+    name: 'عدسات انتي ريفليكشن (Anti-Reflection)',
+    category: 'lens',
+    price: 350,
+    notes: 'ضد الانعكاس والخدش — 1.56',
+    createdAtMs: 1764000004000,
+    updatedAtMs: 1764000004000,
+  },
+  {
+    id: 'starter_lens_bluecut',
+    name: 'عدسات Blue Cut للحماية من الشاشات',
+    category: 'lens',
+    price: 480,
+    notes: 'فلتر الضوء الأزرق والأشعة فوق البنفسجية',
+    createdAtMs: 1764000005000,
+    updatedAtMs: 1764000005000,
+  },
+  {
+    id: 'starter_lens_photo',
+    name: 'عدسات فوتوكروميك (تتلون بالشمس)',
+    category: 'lens',
+    price: 1100,
+    notes: 'تتكيف تلقائياً مع إضاءة الشمس',
+    createdAtMs: 1764000006000,
+    updatedAtMs: 1764000006000,
+  },
+  {
+    id: 'starter_service_solder',
+    name: 'لحام ليزر للشمبر وتعديل الأذرع',
+    category: 'service',
+    price: 150,
+    notes: 'صيانة سريعة للشمبرات المعدن',
+    createdAtMs: 1764000007000,
+    updatedAtMs: 1764000007000,
+  },
+  {
+    id: 'starter_service_pads',
+    name: 'تغيير مخدات الأنف وضبط الاستقامة',
+    category: 'service',
+    price: 50,
+    notes: 'خدمة فورية بالفرع',
+    createdAtMs: 1764000008000,
+    updatedAtMs: 1764000008000,
+  },
+];
+
 
 

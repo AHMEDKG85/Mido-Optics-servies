@@ -2,6 +2,8 @@ import React, { useEffect, useRef } from 'react';
 import QRCode from 'qrcode';
 import {
   AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
   Calendar,
   CheckCircle2,
   Copy,
@@ -9,6 +11,7 @@ import {
   ExternalLink,
   Glasses,
   MessageCircle,
+  MessageSquare,
   Printer,
   RotateCcw,
   X,
@@ -20,8 +23,8 @@ import {
   ShopSettings,
 } from '../types/optics';
 import {
+  buildStageWhatsAppDispatch,
   buildTrackingUrl,
-  buildWhatsAppUrl,
   formatArabicDateTime,
   formatArabicPickupDate,
   getPickupUrgency,
@@ -76,12 +79,15 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   if (!customer) return null;
 
   const stage = Math.max(0, Math.min(4, customer.status || 0));
-  const waUrl = buildWhatsAppUrl({
+  const dispatch = buildStageWhatsAppDispatch({
     customer,
     trackingUrl,
     template: settings.waTemplate,
     shopName: settings.shopName,
   });
+  const readyMessage = dispatch.message;
+  const waUrl = dispatch.waUrl;
+  const smsUrl = dispatch.smsUrl;
 
   const handleCopyLink = async () => {
     try {
@@ -252,14 +258,61 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
             })}
           </div>
 
+          {stage === 4 && !customer.delivered && (
+            <div className="rounded-2xl border border-emerald-300 dark:border-emerald-700 bg-emerald-50/90 dark:bg-emerald-950/40 p-3.5 space-y-2.5">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <span className="text-xs font-extrabold text-emerald-800 dark:text-emerald-300">
+                  النظارة جاهزة للاستلام — أرسل إشعار التوجّه للفرع لهاتف العميل
+                </span>
+                {customer.phone && (
+                  <span dir="ltr" className="font-mono-num text-[11px] font-bold text-emerald-900 dark:text-emerald-200">
+                    {customer.phone}
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-600 dark:text-slate-300 whitespace-pre-line">
+                {readyMessage}
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <a
+                  href={waUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 min-h-[40px] px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold inline-flex items-center justify-center gap-1.5"
+                >
+                  <MessageCircle className="w-4 h-4" />
+                  <span>إشعار واتساب</span>
+                </a>
+                <a
+                  href={smsUrl}
+                  className="flex-1 min-h-[40px] px-3 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold inline-flex items-center justify-center gap-1.5"
+                >
+                  <MessageSquare className="w-4 h-4" />
+                  <span>إشعار SMS</span>
+                </a>
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            {stage > 0 && (
+              <button
+                type="button"
+                onClick={() => onSetStage(customer.id, stage - 1)}
+                className="min-h-[44px] px-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#192b3b] text-slate-700 dark:text-slate-200 hover:border-[#c9a24b] text-sm font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <ArrowRight className="w-4 h-4" />
+                <span>المرحلة السابقة</span>
+              </button>
+            )}
             {stage < 4 && (
               <button
                 type="button"
                 onClick={() => onSetStage(customer.id, stage + 1)}
-                className="min-h-[44px] px-4 rounded-xl bg-gradient-to-br from-[#d9b65c] to-[#a8832f] text-white text-sm font-bold cursor-pointer"
+                className="min-h-[44px] px-4 rounded-xl bg-gradient-to-br from-[#d9b65c] to-[#a8832f] text-white text-sm font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer"
               >
-                ترقية للمرحلة التالية
+                <ArrowLeft className="w-4 h-4" />
+                <span>المرحلة التالية</span>
               </button>
             )}
             {!customer.delivered ? (

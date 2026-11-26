@@ -3,26 +3,33 @@ import assert from 'node:assert/strict';
 import {
   advanceHist,
   buildSinglePagePdfFromJpeg,
+  buildSmsUrl,
+  buildStageWhatsAppDispatch,
   buildTrackingUrl,
   buildWhatsAppUrl,
-  calculateLoyaltySummary,
+  calculateAutoTotal,
   calculateMonthlyCustomerGrowth,
   calculateOrderReadinessStats,
   calculateRemaining,
   checkEyeLensAvailability,
   collectPickupReminders,
   filterArchivedOrders,
+  filterPriceItems,
   formatEgyptianWhatsAppPhone,
   formatFirebaseAuthError,
   getPickupUrgency,
   inferExpectedPolarity,
   normalizeCustomerRecord,
   normalizeLensPowerValue,
+  normalizePriceCategory,
+  normalizePriceItem,
   parseLensInventoryBackupJson,
+  renderReadyPickupMessage,
   renderWhatsAppMessage,
   sanitizePickupDate,
+  STARTER_PRICE_ITEMS,
 } from './optics';
-import type { CustomerRecord } from '../types/optics';
+import type { CustomerRecord, PriceItem } from '../types/optics';
 
 test('calculateRemaining computes total minus paid accurately', () => {
   assert.equal(calculateRemaining(1200, 500), 700);
@@ -80,77 +87,61 @@ test('renderWhatsAppMessage and buildWhatsAppUrl interpolate stage, name, and tr
   assert.ok(decodeURIComponent(waUrl).includes(trackingUrl));
 });
 
-test('calculateLoyaltySummary aggregates visits, points, tiers, and discounts', () => {
-  const records: CustomerRecord[] = [
-    {
-      id: '1',
-      date: '2026-01-01T10:00:00Z',
-      name: 'كريم',
-      phone: '01011112222',
-      frame: 'F1',
-      lens: 'L1',
-      total: 1500,
-      paid: 1500,
-      photo: '',
-      r: ['-', '-', '-'],
-      l: ['-', '-', '-'],
-      status: 0,
-      hist: [1],
-      tok: 'tok1111111',
-      pickupDate: '',
-      delivered: false,
-    },
-    {
-      id: '2',
-      date: '2026-02-01T10:00:00Z',
-      name: 'كريم',
-      phone: '01011112222',
-      frame: 'F2',
-      lens: 'L2',
-      total: 1200,
-      paid: 1200,
-      photo: '',
-      r: ['-', '-', '-'],
-      l: ['-', '-', '-'],
-      status: 0,
-      hist: [1],
-      tok: 'tok2222222',
-      pickupDate: '',
-      delivered: false,
-    },
-    {
-      id: '3',
-      date: '2026-02-02T10:00:00Z',
-      name: 'منى',
-      phone: '01299998888',
-      frame: 'F3',
-      lens: 'L3',
-      total: 500,
-      paid: 500,
-      photo: '',
-      r: ['-', '-', '-'],
-      l: ['-', '-', '-'],
-      status: 0,
-      hist: [1],
-      tok: 'tok3333333',
-      pickupDate: '',
-      delivered: false,
-    },
-  ];
+test('calculateAutoTotal sums framePrice and lensPrice safely', () => {
+  assert.equal(calculateAutoTotal(450, 350), 800);
+  assert.equal(calculateAutoTotal('1200', ''), 1200);
+  assert.equal(calculateAutoTotal('', '550.5'), 550.5);
+  assert.equal(calculateAutoTotal('-100', '300'), 300);
+});
 
-  const summary = calculateLoyaltySummary(records);
-  assert.equal(summary.length, 2);
-  assert.equal(summary[0].name, 'كريم');
-  assert.equal(summary[0].visits, 2);
-  assert.equal(summary[0].paid, 2700);
-  assert.equal(summary[0].points, 27);
-  assert.equal(summary[0].tier, 'ذهبي');
-  assert.equal(summary[0].rewardText, 'خصم 100 جنيه');
+test('renderReadyPickupMessage, buildStageWhatsAppDispatch, and buildSmsUrl handle Stage 4 vs earlier stages', () => {
+  const readyCustomer = {
+    name: 'يوسف كريم',
+    phone: '01012345678',
+    frame: 'Ray-Ban',
+    lens: 'Blue Cut',
+    total: 1500,
+    paid: 1000,
+    status: 4,
+  };
+  const msg = renderReadyPickupMessage({
+    customer: readyCustomer,
+    trackingUrl: 'https://mido.app/#track-abc12345',
+    shopName: 'Mido Optics',
+  });
+  assert.match(msg, /يوسف كريم/);
+  assert.match(msg, /Ray-Ban · Blue Cut/);
+  assert.match(msg, /جاهزة للاستلام/);
+  assert.match(msg, /توجّه إلى الفرع/);
+  assert.match(msg, /500/);
 
-  assert.equal(summary[1].name, 'منى');
-  assert.equal(summary[1].points, 5);
-  assert.equal(summary[1].tier, 'برونزي');
-  assert.equal(summary[1].rewardText, '—');
+  const stage4Dispatch = buildStageWhatsAppDispatch({
+    customer: readyCustomer,
+    trackingUrl: 'https://mido.app/#track-abc12345',
+    shopName: 'Mido Optics',
+  });
+  assert.equal(stage4Dispatch.isReadyNotification, true);
+  assert.ok(stage4Dispatch.waUrl.startsWith('https://wa.me/201012345678?text='));
+  assert.ok(decodeURIComponent(stage4Dispatch.waUrl).includes('توجّه إلى الفرع'));
+
+  const stage2Dispatch = buildStageWhatsAppDispatch({
+    customer: { ...readyCustomer, status: 2 },
+    trackingUrl: 'https://mido.app/#track-abc12345',
+    shopName: 'Mido Optics',
+  });
+  assert.equal(stage2Dispatch.isReadyNotification, false);
+  assert.ok(decodeURIComponent(stage2Dispatch.waUrl).includes('العدسات وصلت'));
+
+  const directStage4WaUrl = buildWhatsAppUrl({
+    customer: readyCustomer,
+    trackingUrl: 'https://mido.app/#track-abc12345',
+    shopName: 'Mido Optics',
+  });
+  assert.ok(decodeURIComponent(directStage4WaUrl).includes('جاهزة للاستلام'));
+
+  const smsUrl = buildSmsUrl('01012345678', msg);
+  assert.ok(smsUrl.startsWith('sms:+201012345678?body='));
+  assert.ok(decodeURIComponent(smsUrl).includes('توجّه إلى الفرع'));
 });
 
 test('calculateOrderReadinessStats and calculateMonthlyCustomerGrowth compute dashboard metrics', () => {
@@ -288,9 +279,12 @@ test('normalizeCustomerRecord safely upgrades legacy backup records', () => {
   assert.equal(normalizeCustomerRecord({ name: '' }), null);
 });
 
-test('advanceHist records target stage timestamp and preserves prior stages', () => {
+test('advanceHist records target stage timestamp, preserves prior stages, and supports stepping backward', () => {
   const next = advanceHist([1000], 2, 5000);
   assert.deepEqual(next, [1000, null, 5000]);
+
+  const steppedBack = advanceHist([1000, 2000, 3000, 4000], 2, 6000);
+  assert.deepEqual(steppedBack, [1000, 2000, 6000]);
 });
 
 test('sanitizePickupDate and getPickupUrgency classify overdue, today, soon, upcoming, and delivered', () => {
@@ -504,5 +498,50 @@ test('filterArchivedOrders returns only delivered customers, supports multi-fiel
   assert.equal(filterArchivedOrders(records, 'tok_old_11')[0]?.id, 'arch-old');
   assert.equal(filterArchivedOrders(records, 'نشط').length, 0);
 });
+
+test('normalizePriceItem, filterPriceItems, and STARTER_PRICE_ITEMS handle categories and search cleanly', () => {
+  assert.equal(normalizePriceCategory('lens'), 'lens');
+  assert.equal(normalizePriceCategory('unknown'), 'frame');
+  assert.equal(normalizePriceItem({ name: '   ', price: 100 }), null);
+
+  const normalized = normalizePriceItem({
+    id: 'price 1',
+    name: 'عدسات بلو كت',
+    category: 'lens',
+    price: '-250',
+    notes: 'حماية من الأشعة',
+    createdAtMs: 1000,
+    updatedAtMs: 2000,
+  });
+  assert.ok(normalized);
+  assert.equal(normalized.id, 'price_1');
+  assert.equal(normalized.price, 0);
+  assert.equal(normalized.category, 'lens');
+
+  const items: PriceItem[] = [
+    ...STARTER_PRICE_ITEMS,
+    {
+      id: 'custom_1',
+      name: 'تنظيف التراسونيك للنظارة',
+      category: 'service',
+      price: 40,
+      notes: 'تنظيف عميق بالموجات',
+      createdAtMs: 9000,
+      updatedAtMs: 9999999999999,
+    },
+  ];
+
+  const lensesOnly = filterPriceItems(items, 'lens', '');
+  assert.ok(lensesOnly.length >= 3);
+  assert.ok(lensesOnly.every((item) => item.category === 'lens'));
+
+  const servicesMatch = filterPriceItems(items, 'service', 'التراسونيك');
+  assert.equal(servicesMatch.length, 1);
+  assert.equal(servicesMatch[0].id, 'custom_1');
+
+  const allSorted = filterPriceItems(items, 'all', '');
+  assert.equal(allSorted[0].id, 'custom_1');
+});
+
 
 

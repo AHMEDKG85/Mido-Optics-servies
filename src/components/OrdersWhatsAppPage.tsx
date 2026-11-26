@@ -1,14 +1,16 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { User } from 'firebase/auth';
 import {
   AlertTriangle,
   ArrowLeft,
+  ArrowRight,
   Bell,
   BellOff,
   Calendar,
   CheckCircle2,
   Copy,
   MessageCircle,
+  MessageSquare,
   PackageCheck,
   Printer,
   QrCode,
@@ -25,6 +27,7 @@ import {
 } from '../types/optics';
 import {
   AuthErrorSummary,
+  buildStageWhatsAppDispatch,
   buildTrackingUrl,
   buildWhatsAppUrl,
   formatArabicDateTime,
@@ -41,7 +44,9 @@ export interface WhatsAppDispatchItem {
   customer: CustomerRecord;
   trackingUrl: string;
   waUrl: string;
+  smsUrl?: string;
   message: string;
+  isReadyNotification?: boolean;
   triggeredAt: number;
 }
 
@@ -106,6 +111,13 @@ export const OrdersWhatsAppPage: React.FC<OrdersWhatsAppPageProps> = ({
   const [showTemplateEditor, setShowTemplateEditor] = useState(false);
   const [templateDraft, setTemplateDraft] = useState(settings.waTemplate);
   const [publicBaseUrlDraft, setPublicBaseUrlDraft] = useState(settings.publicBaseUrl || '');
+  const dispatchCardRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (pendingDispatch?.isReadyNotification && dispatchCardRef.current) {
+      dispatchCardRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [pendingDispatch?.triggeredAt, pendingDispatch?.isReadyNotification]);
 
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
   const pathname = typeof window !== 'undefined' ? window.location.pathname : '/';
@@ -353,31 +365,50 @@ export const OrdersWhatsAppPage: React.FC<OrdersWhatsAppPageProps> = ({
         onToast={onToast}
       />
 
-      {/* Auto-Prepared WhatsApp Dispatch Card */}
+      {/* Auto-Prepared Customer Phone Dispatch Card */}
       {pendingDispatch && (
         <div
+          ref={dispatchCardRef}
           role="region"
-          aria-label="رسالة واتساب جاهزة للإرسال"
-          className="rounded-2xl border border-emerald-300 dark:border-emerald-700 bg-emerald-50/80 dark:bg-emerald-950/35 p-4 sm:p-5 space-y-3"
+          aria-label="إشعار جاهز للإرسال على هاتف العميل"
+          className={`rounded-2xl border p-4 sm:p-5 space-y-3 ${
+            pendingDispatch.isReadyNotification
+              ? 'border-emerald-400 dark:border-emerald-600 bg-emerald-50 dark:bg-emerald-950/45 shadow-sm'
+              : 'border-emerald-300 dark:border-emerald-700 bg-emerald-50/80 dark:bg-emerald-950/35'
+          }`}
         >
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <p className="text-xs font-bold text-emerald-800 dark:text-emerald-300">
-                تم تجهيز رابط المتابعة التلقائي للعميل: {pendingDispatch.customer.name}
+              <p className="text-xs sm:text-sm font-extrabold text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5 flex-wrap">
+                <span>
+                  {pendingDispatch.isReadyNotification
+                    ? `تم تجهيز إشعار جاهزية الاستلام للعميل: ${pendingDispatch.customer.name}`
+                    : `تم تجهيز رابط المتابعة التلقائي للعميل: ${pendingDispatch.customer.name}`}
+                </span>
+                {pendingDispatch.customer.phone && (
+                  <span dir="ltr" className="font-mono-num text-xs bg-white/80 dark:bg-slate-900/60 px-2 py-0.5 rounded-lg border border-emerald-200 dark:border-emerald-800">
+                    {pendingDispatch.customer.phone}
+                  </span>
+                )}
               </p>
-              <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 whitespace-pre-line">
+              <p className="text-xs text-slate-700 dark:text-slate-200 mt-1.5 whitespace-pre-line leading-relaxed">
                 {pendingDispatch.message}
               </p>
             </div>
             <button
               type="button"
               onClick={onClearDispatch}
-              aria-label="إغلاق إشعار واتساب"
+              aria-label="إغلاق إشعار العميل"
               className="text-xs font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 px-2 py-1 cursor-pointer"
             >
               إغلاق ✕
             </button>
           </div>
+          {!pendingDispatch.customer.phone && (
+            <p className="text-xs font-semibold text-amber-800 dark:text-amber-300 bg-amber-100/80 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-800 rounded-xl px-3 py-2">
+              ملاحظة: لم يتم تسجيل رقم هاتف لهذا العميل، يمكنك إضافة رقمه أو اختيار جهة الاتصال عند الإرسال.
+            </p>
+          )}
           {!isCloudSignedIn && (
             <p className="text-xs font-semibold text-amber-800 dark:text-amber-300 bg-amber-100/80 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-800 rounded-xl px-3 py-2">
               تنبيه: الحساب غير مربوط بـ Google حالياً، لذلك لن تظهر تفاصيل الطلب عند العميل على جهازه حتى تقوم بربط الحساب من الشريط العلوي ليتم رفعه للسحابة.
@@ -391,12 +422,25 @@ export const OrdersWhatsAppPage: React.FC<OrdersWhatsAppPageProps> = ({
               className="min-h-[44px] px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold inline-flex items-center gap-2 transition-colors"
             >
               <MessageCircle className="w-4 h-4" />
-              <span>فتح واتساب وإرسال الرابط الآن</span>
+              <span>
+                {pendingDispatch.isReadyNotification
+                  ? 'إرسال إشعار واتساب للعميل'
+                  : 'فتح واتساب وإرسال الرابط الآن'}
+              </span>
             </a>
+            {pendingDispatch.smsUrl && (
+              <a
+                href={pendingDispatch.smsUrl}
+                className="min-h-[44px] px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs sm:text-sm font-bold inline-flex items-center gap-2 transition-colors"
+              >
+                <MessageSquare className="w-4 h-4" />
+                <span>إرسال رسالة نصية SMS</span>
+              </a>
+            )}
             <button
               type="button"
               onClick={() =>
-                void handleCopy(pendingDispatch.message, 'تم نسخ رسالة الواتساب والرابط')
+                void handleCopy(pendingDispatch.message, 'تم نسخ نص الإشعار والرابط')
               }
               className="min-h-[44px] px-4 py-2.5 rounded-xl bg-white dark:bg-[#15232f] border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
             >
@@ -622,19 +666,30 @@ export const OrdersWhatsAppPage: React.FC<OrdersWhatsAppPageProps> = ({
                   )}
                 </div>
 
-                {/* Quick Actions: Advance Stage + Mark Delivered + WhatsApp + Copy + QR */}
-                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                {/* Quick Actions: Prev Stage + Next Stage + Mark Delivered + WhatsApp + Copy + QR */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+                  {stage > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => onAdvanceStage(c.id, stage - 1)}
+                      className="min-h-[40px] px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#192b3b] text-slate-700 dark:text-slate-200 hover:border-[#c9a24b] text-xs font-bold inline-flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap shrink-0"
+                    >
+                      <ArrowRight className="w-3.5 h-3.5" />
+                      <span>المرحلة السابقة</span>
+                    </button>
+                  )}
+
                   {stage < 4 ? (
                     <button
                       type="button"
                       onClick={() => onAdvanceStage(c.id, stage + 1)}
-                      className="min-h-[42px] px-3 py-2 rounded-xl bg-gradient-to-br from-[#d9b65c] to-[#a8832f] text-white text-xs font-bold inline-flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap shrink-0"
+                      className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-gradient-to-br from-[#d9b65c] to-[#a8832f] text-white text-xs font-bold inline-flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap shrink-0"
                     >
                       <ArrowLeft className="w-3.5 h-3.5" />
                       <span>المرحلة التالية</span>
                     </button>
                   ) : (
-                    <span className="min-h-[42px] px-2.5 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 text-xs font-bold inline-flex items-center gap-1 whitespace-nowrap shrink-0">
+                    <span className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 text-xs font-bold inline-flex items-center gap-1 whitespace-nowrap shrink-0">
                       <CheckCircle2 className="w-4 h-4" />
                       <span>جاهزة</span>
                     </span>
@@ -643,7 +698,7 @@ export const OrdersWhatsAppPage: React.FC<OrdersWhatsAppPageProps> = ({
                   <button
                     type="button"
                     onClick={() => onMarkDelivered(c.id)}
-                    className="min-h-[42px] px-3 py-2 rounded-xl bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 hover:opacity-90 text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+                    className="min-h-[40px] px-2.5 py-1.5 rounded-xl bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 hover:opacity-90 text-xs font-bold inline-flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap shrink-0"
                   >
                     <PackageCheck className="w-4 h-4 shrink-0" />
                     <span>استلام النظارة</span>
@@ -653,7 +708,7 @@ export const OrdersWhatsAppPage: React.FC<OrdersWhatsAppPageProps> = ({
                     href={waUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex-1 min-h-[42px] px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap"
+                    className="flex-1 min-w-[70px] min-h-[40px] px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold inline-flex items-center justify-center gap-1 transition-colors whitespace-nowrap"
                   >
                     <MessageCircle className="w-4 h-4 shrink-0" />
                     <span>واتساب</span>
@@ -663,18 +718,18 @@ export const OrdersWhatsAppPage: React.FC<OrdersWhatsAppPageProps> = ({
                     type="button"
                     onClick={() =>
                       void handleCopy(
-                        renderWhatsAppMessage({
-                          template: settings.waTemplate,
+                        buildStageWhatsAppDispatch({
                           customer: c,
                           trackingUrl,
+                          template: settings.waTemplate,
                           shopName: settings.shopName,
-                        }),
+                        }).message,
                         'تم نسخ رسالة المتابعة والرابط'
                       )
                     }
                     aria-label={`نسخ رابط متابعة ${c.name}`}
                     title="نسخ الرسالة والرابط"
-                    className="min-h-[42px] min-w-[42px] px-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-[#c9a24b] inline-flex items-center justify-center cursor-pointer shrink-0"
+                    className="min-h-[40px] min-w-[36px] px-2 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-[#c9a24b] inline-flex items-center justify-center cursor-pointer shrink-0"
                   >
                     <Copy className="w-4 h-4" />
                   </button>
@@ -684,7 +739,7 @@ export const OrdersWhatsAppPage: React.FC<OrdersWhatsAppPageProps> = ({
                     onClick={() => onOpenInvoice(c)}
                     aria-label={`فاتورة ${c.name}`}
                     title="طباعة / مشاركة فاتورة PDF"
-                    className="min-h-[42px] min-w-[42px] px-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-[#8f6c1e] dark:text-[#e8cf8b] hover:border-[#c9a24b] inline-flex items-center justify-center cursor-pointer shrink-0"
+                    className="min-h-[40px] min-w-[36px] px-2 rounded-xl border border-slate-200 dark:border-slate-700 text-[#8f6c1e] dark:text-[#e8cf8b] hover:border-[#c9a24b] inline-flex items-center justify-center cursor-pointer shrink-0"
                   >
                     <Printer className="w-4 h-4" />
                   </button>
@@ -694,7 +749,7 @@ export const OrdersWhatsAppPage: React.FC<OrdersWhatsAppPageProps> = ({
                     onClick={() => onOpenOrderModal(c)}
                     aria-label={`تفاصيل و QR ${c.name}`}
                     title="تفاصيل الطلب و QR"
-                    className="min-h-[42px] min-w-[42px] px-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-[#c9a24b] inline-flex items-center justify-center cursor-pointer shrink-0"
+                    className="min-h-[40px] min-w-[36px] px-2 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-[#c9a24b] inline-flex items-center justify-center cursor-pointer shrink-0"
                   >
                     <QrCode className="w-4 h-4" />
                   </button>

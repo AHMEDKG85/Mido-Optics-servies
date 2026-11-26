@@ -1,14 +1,20 @@
-import React, { useEffect, useState } from 'react';
-import { Calendar, Check, Glasses, Phone, User, X } from 'lucide-react';
-import { CustomerRecord, LensInventorySnapshot } from '../types/optics';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Calendar, Check, Glasses, Phone, Tag, User, X } from 'lucide-react';
+import { CustomerRecord, LensInventorySnapshot, PriceItem } from '../types/optics';
 import { CustomerInput } from '../hooks/useOpticsStore';
-import { calculateRemaining, formatArabicDateTime } from '../utils/optics';
+import {
+  calculateAutoTotal,
+  calculateRemaining,
+  formatArabicDateTime,
+} from '../utils/optics';
 import { EyeLensStatusBadge } from './EyeLensStatusBadge';
 
 interface CustomerFormModalProps {
   isOpen: boolean;
   editingCustomer: CustomerRecord | null;
   lensInventory: LensInventorySnapshot | null;
+  priceItems: PriceItem[];
+  onOpenPriceList?: () => void;
   onClose: () => void;
   onSave: (input: CustomerInput) => void;
   onToast: (msg: string) => void;
@@ -18,6 +24,8 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
   isOpen,
   editingCustomer,
   lensInventory,
+  priceItems,
+  onOpenPriceList,
   onClose,
   onSave,
   onToast,
@@ -26,6 +34,8 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
   const [phone, setPhone] = useState('');
   const [frame, setFrame] = useState('');
   const [lens, setLens] = useState('');
+  const [framePrice, setFramePrice] = useState('');
+  const [lensPrice, setLensPrice] = useState('');
   const [total, setTotal] = useState('');
   const [paid, setPaid] = useState('');
   const [photo, setPhoto] = useState('');
@@ -45,6 +55,16 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
       setPhone(editingCustomer.phone);
       setFrame(editingCustomer.frame);
       setLens(editingCustomer.lens);
+      setFramePrice(
+        editingCustomer.framePrice && editingCustomer.framePrice > 0
+          ? String(editingCustomer.framePrice)
+          : ''
+      );
+      setLensPrice(
+        editingCustomer.lensPrice && editingCustomer.lensPrice > 0
+          ? String(editingCustomer.lensPrice)
+          : ''
+      );
       setTotal(String(editingCustomer.total));
       setPaid(String(editingCustomer.paid));
       setPhoto(editingCustomer.photo || '');
@@ -63,6 +83,8 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
     setPhone('');
     setFrame('');
     setLens('');
+    setFramePrice('');
+    setLensPrice('');
     setTotal('');
     setPaid('');
     setPhoto('');
@@ -82,6 +104,19 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
     const timer = window.setInterval(updateClock, 1000);
     return () => window.clearInterval(timer);
   }, [isOpen, editingCustomer]);
+
+  const framePriceItems = useMemo(
+    () => priceItems.filter((item) => item.category === 'frame'),
+    [priceItems]
+  );
+  const lensPriceItems = useMemo(
+    () => priceItems.filter((item) => item.category === 'lens'),
+    [priceItems]
+  );
+  const servicePriceItems = useMemo(
+    () => priceItems.filter((item) => item.category === 'service'),
+    [priceItems]
+  );
 
   if (!isOpen) return null;
 
@@ -111,6 +146,61 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
     img.src = objectUrl;
   };
 
+  const handleFramePriceChange = (nextFramePrice: string) => {
+    setFramePrice(nextFramePrice);
+    if (nextFramePrice.trim() === '' && lensPrice.trim() === '') {
+      setTotal('');
+    } else {
+      setTotal(String(calculateAutoTotal(nextFramePrice, lensPrice)));
+    }
+  };
+
+  const handleLensPriceChange = (nextLensPrice: string) => {
+    setLensPrice(nextLensPrice);
+    if (framePrice.trim() === '' && nextLensPrice.trim() === '') {
+      setTotal('');
+    } else {
+      setTotal(String(calculateAutoTotal(framePrice, nextLensPrice)));
+    }
+  };
+
+  const handlePickFrameFromPriceList = (priceId: string) => {
+    const picked = framePriceItems.find((item) => item.id === priceId);
+    if (!picked) return;
+    const nextPriceStr = String(picked.price);
+    setFrame(picked.name);
+    setFramePrice(nextPriceStr);
+    setTotal(String(calculateAutoTotal(nextPriceStr, lensPrice)));
+  };
+
+  const handlePickLensFromPriceList = (priceId: string) => {
+    const picked = lensPriceItems.find((item) => item.id === priceId);
+    if (!picked) return;
+    const nextPriceStr = String(picked.price);
+    setLens(picked.name);
+    setLensPrice(nextPriceStr);
+    setTotal(String(calculateAutoTotal(framePrice, nextPriceStr)));
+  };
+
+  const handlePickServiceFromPriceList = (priceId: string) => {
+    const picked = servicePriceItems.find((item) => item.id === priceId);
+    if (!picked) return;
+    const currentLensText = lens.trim();
+    const nextLensText = currentLensText
+      ? currentLensText.includes(picked.name)
+        ? currentLensText
+        : `${currentLensText} + ${picked.name}`.slice(0, 120)
+      : picked.name;
+    const currentLensPriceNum = Math.max(0, Number(lensPrice) || 0);
+    const nextLensPriceStr = String(
+      Math.round((currentLensPriceNum + picked.price) * 100) / 100
+    );
+    setLens(nextLensText);
+    setLensPrice(nextLensPriceStr);
+    setTotal(String(calculateAutoTotal(framePrice, nextLensPriceStr)));
+    onToast(`تمت إضافة «${picked.name}» (${picked.price} ج.م)`);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedName = name.trim();
@@ -125,6 +215,8 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
       phone: phone.trim(),
       frame: frame.trim(),
       lens: lens.trim(),
+      framePrice: Math.max(0, Number(framePrice) || 0),
+      lensPrice: Math.max(0, Number(lensPrice) || 0),
       total: Math.max(0, Number(total) || 0),
       paid: Math.max(0, Number(paid) || 0),
       photo,
@@ -209,35 +301,144 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
               />
             </div>
 
-            <div>
-              <label
-                htmlFor="cust-frame"
-                className="text-xs font-semibold text-slate-600 dark:text-slate-300 block mb-1"
-              >
-                نوع الشمبر
-              </label>
-              <input
-                id="cust-frame"
-                value={frame}
-                onChange={(e) => setFrame(e.target.value)}
-                className="w-full min-h-[42px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0d1722] text-sm focus:outline-none focus:border-[#c9a24b]"
-              />
+            <div className="space-y-3">
+              <div>
+                <label
+                  htmlFor="cust-frame"
+                  className="text-xs font-semibold text-slate-600 dark:text-slate-300 block mb-1"
+                >
+                  نوع الشمبر
+                </label>
+                <input
+                  id="cust-frame"
+                  value={frame}
+                  onChange={(e) => setFrame(e.target.value)}
+                  className="w-full min-h-[42px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0d1722] text-sm focus:outline-none focus:border-[#c9a24b]"
+                />
+                {framePriceItems.length > 0 && (
+                  <select
+                    aria-label="اختيار شمبر من قائمة الأسعار"
+                    value=""
+                    onChange={(e) => handlePickFrameFromPriceList(e.target.value)}
+                    className="mt-1.5 w-full min-h-[36px] px-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-[#f3f9fd] dark:bg-[#1b3042] text-xs font-semibold text-[#8f6c1e] dark:text-[#e8cf8b] focus:outline-none focus:border-[#c9a24b]"
+                  >
+                    <option value="">— اختر شمبر من قائمة الأسعار —</option>
+                    {framePriceItems.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name} ({item.price} ج.م)
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              <div>
+                <label
+                  htmlFor="cust-frame-price"
+                  className="text-xs font-semibold text-slate-600 dark:text-slate-300 block mb-1"
+                >
+                  سعر الشمبر (جنيه)
+                </label>
+                <input
+                  id="cust-frame-price"
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={framePrice}
+                  onChange={(e) => handleFramePriceChange(e.target.value)}
+                  className="w-full min-h-[42px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0d1722] text-sm tabular-nums focus:outline-none focus:border-[#c9a24b]"
+                />
+              </div>
             </div>
 
-            <div>
-              <label
-                htmlFor="cust-lens"
-                className="text-xs font-semibold text-slate-600 dark:text-slate-300 block mb-1"
-              >
-                نوع العدسات
-              </label>
-              <input
-                id="cust-lens"
-                value={lens}
-                onChange={(e) => setLens(e.target.value)}
-                className="w-full min-h-[42px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0d1722] text-sm focus:outline-none focus:border-[#c9a24b]"
-              />
+            <div className="space-y-3">
+              <div>
+                <label
+                  htmlFor="cust-lens"
+                  className="text-xs font-semibold text-slate-600 dark:text-slate-300 block mb-1"
+                >
+                  نوع العدسات
+                </label>
+                <input
+                  id="cust-lens"
+                  value={lens}
+                  onChange={(e) => setLens(e.target.value)}
+                  className="w-full min-h-[42px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0d1722] text-sm focus:outline-none focus:border-[#c9a24b]"
+                />
+                {lensPriceItems.length > 0 && (
+                  <select
+                    aria-label="اختيار عدسات من قائمة الأسعار"
+                    value=""
+                    onChange={(e) => handlePickLensFromPriceList(e.target.value)}
+                    className="mt-1.5 w-full min-h-[36px] px-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-[#f3f9fd] dark:bg-[#1b3042] text-xs font-semibold text-[#8f6c1e] dark:text-[#e8cf8b] focus:outline-none focus:border-[#c9a24b]"
+                  >
+                    <option value="">— اختر عدسات من قائمة الأسعار —</option>
+                    {lensPriceItems.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name} ({item.price} ج.م)
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              <div>
+                <label
+                  htmlFor="cust-lens-price"
+                  className="text-xs font-semibold text-slate-600 dark:text-slate-300 block mb-1"
+                >
+                  سعر العدسات (جنيه)
+                </label>
+                <input
+                  id="cust-lens-price"
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={lensPrice}
+                  onChange={(e) => handleLensPriceChange(e.target.value)}
+                  className="w-full min-h-[42px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0d1722] text-sm tabular-nums focus:outline-none focus:border-[#c9a24b]"
+                />
+              </div>
             </div>
+
+            {servicePriceItems.length > 0 && (
+              <div className="sm:col-span-2">
+                <label
+                  htmlFor="cust-service-ref"
+                  className="text-xs font-semibold text-slate-600 dark:text-slate-300 flex items-center gap-1.5 mb-1"
+                >
+                  <Tag className="w-3.5 h-3.5 text-[#c9a24b]" />
+                  <span>إضافة خدمة أو صيانة من قائمة الأسعار (اختياري)</span>
+                </label>
+                <select
+                  id="cust-service-ref"
+                  aria-label="إضافة خدمة من قائمة الأسعار"
+                  value=""
+                  onChange={(e) => handlePickServiceFromPriceList(e.target.value)}
+                  className="w-full min-h-[40px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-[#f3f9fd] dark:bg-[#1b3042] text-xs font-semibold text-[#8f6c1e] dark:text-[#e8cf8b] focus:outline-none focus:border-[#c9a24b]"
+                >
+                  <option value="">— اختر خدمة لإضافتها تلقائياً إلى السعر —</option>
+                  {servicePriceItems.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name} (+{item.price} ج.م)
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {priceItems.length === 0 && onOpenPriceList && (
+              <div className="sm:col-span-2 flex items-center justify-between gap-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-[#f3f9fd] dark:bg-[#1b3042]/60 px-3 py-2 text-xs text-slate-600 dark:text-slate-300">
+                <span>أضف أسعار الشمبرات والعدسات في «قائمة الأسعار» لاستخدامها كمرجع سريع هنا.</span>
+                <button
+                  type="button"
+                  onClick={onOpenPriceList}
+                  className="font-bold text-[#8f6c1e] dark:text-[#e8cf8b] underline whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  فتح قائمة الأسعار
+                </button>
+              </div>
+            )}
 
             <div>
               <label
@@ -253,8 +454,13 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
                 step="any"
                 value={total}
                 onChange={(e) => setTotal(e.target.value)}
-                className="w-full min-h-[42px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0d1722] text-sm tabular-nums focus:outline-none focus:border-[#c9a24b]"
+                className="w-full min-h-[42px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0d1722] text-sm font-bold tabular-nums focus:outline-none focus:border-[#c9a24b]"
               />
+              {(framePrice.trim() !== '' || lensPrice.trim() !== '') && (
+                <p className="text-[11px] text-[#8f6c1e] dark:text-[#e8cf8b] mt-1 tabular-nums">
+                  يحسب تلقائياً: سعر الشمبر + سعر العدسات
+                </p>
+              )}
             </div>
 
             <div>

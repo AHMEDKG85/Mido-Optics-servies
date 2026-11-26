@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Copy, MessageCircle, MessageSquare } from 'lucide-react';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Header } from './components/Header';
 import { SyncToolbar } from './components/SyncToolbar';
 import { CustomersPage } from './components/CustomersPage';
-import { LoyaltyPage } from './components/LoyaltyPage';
 import {
   OrdersWhatsAppPage,
   WhatsAppDispatchItem,
 } from './components/OrdersWhatsAppPage';
 import { ArchivePage } from './components/ArchivePage';
+import { PriceListPage } from './components/PriceListPage';
 import { StatsDashboardPage } from './components/StatsDashboardPage';
 import { CustomerFormModal } from './components/CustomerFormModal';
 import { OrderDetailModal } from './components/OrderDetailModal';
@@ -21,10 +22,9 @@ import { signInWithGoogle, signOutUser } from './lib/firebase';
 import { AppPage, CustomerRecord } from './types/optics';
 import {
   AuthErrorSummary,
+  buildStageWhatsAppDispatch,
   buildTrackingUrl,
-  buildWhatsAppUrl,
   formatFirebaseAuthError,
-  renderWhatsAppMessage,
 } from './utils/optics';
 
 function parseHashRoute(hash: string): { page: AppPage; trackToken: string | null } {
@@ -33,9 +33,9 @@ function parseHashRoute(hash: string): { page: AppPage; trackToken: string | nul
     return { page: 'track', trackToken: clean.slice(6) };
   }
   if (
-    clean === 'loyalty' ||
     clean === 'orders' ||
     clean === 'archive' ||
+    clean === 'prices' ||
     clean === 'stats' ||
     clean === 'customers'
   ) {
@@ -130,7 +130,7 @@ function MidoOpticsApp() {
   });
 
   const prepareWhatsAppDispatch = useCallback(
-    (record: CustomerRecord) => {
+    (record: CustomerRecord, options?: { readyPickup?: boolean }) => {
       const origin = window.location.origin;
       const pathname = window.location.pathname;
       const trackingUrl = buildTrackingUrl(
@@ -139,25 +139,25 @@ function MidoOpticsApp() {
         record.tok,
         store.settings.publicBaseUrl
       );
-      const message = renderWhatsAppMessage({
-        template: store.settings.waTemplate,
-        customer: record,
-        trackingUrl,
-        shopName: store.settings.shopName,
-      });
-      const waUrl = buildWhatsAppUrl({
+      const dispatch = buildStageWhatsAppDispatch({
         customer: record,
         trackingUrl,
         template: store.settings.waTemplate,
         shopName: store.settings.shopName,
+        forceReadyMessage: options?.readyPickup,
       });
+
       setPendingDispatch({
         customer: record,
         trackingUrl,
-        waUrl,
-        message,
+        waUrl: dispatch.waUrl,
+        smsUrl: dispatch.smsUrl,
+        message: dispatch.message,
+        isReadyNotification: dispatch.isReadyNotification,
         triggeredAt: Date.now(),
       });
+
+      return dispatch;
     },
     [store.settings.waTemplate, store.settings.shopName, store.settings.publicBaseUrl]
   );
@@ -192,13 +192,29 @@ function MidoOpticsApp() {
   };
 
   const handleAdvanceStage = (customerId: string, nextStage: number) => {
+    const previous = store.customers.find((c) => c.id === customerId);
     const updated = store.updateOrderStage(customerId, nextStage);
     if (!updated) return;
+    const isMovingBack = previous ? updated.status < previous.status : false;
+
+    if (updated.status === 4) {
+      const dispatch = prepareWhatsAppDispatch(updated, { readyPickup: true });
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        void navigator.clipboard.writeText(dispatch.message).catch(() => {});
+      }
+      showToast('النظارة جاهزة للاستلام — تم تجهيز إشعار واتساب التلقائي للعميل');
+      return;
+    }
+
     if (store.settings.autoWhatsApp) {
       prepareWhatsAppDispatch(updated);
-      showToast('تم تحديث الحالة وتجهيز رسالة واتساب');
+      showToast(
+        isMovingBack
+          ? 'تم الرجوع للمرحلة السابقة وتحديث رسالة المتابعة'
+          : 'تم تحديث الحالة وتجهيز رسالة واتساب'
+      );
     } else {
-      showToast('تم تحديث حالة النظارة');
+      showToast(isMovingBack ? 'تم الرجوع للمرحلة السابقة' : 'تم تحديث حالة النظارة');
     }
   };
 
@@ -280,12 +296,83 @@ function MidoOpticsApp() {
         />
 
         <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 py-5 sm:py-6">
+          {pendingDispatch?.isReadyNotification &&
+            routeState.page !== 'orders' &&
+            !orderModalCustomer && (
+              <div
+                role="region"
+                aria-label="إشعار واتساب جاهز للعميل"
+                className="mb-4 rounded-2xl border border-emerald-400 dark:border-emerald-600 bg-emerald-50 dark:bg-emerald-950/45 p-4 space-y-3 shadow-sm"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="text-xs sm:text-sm font-extrabold text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5 flex-wrap">
+                      <span>
+                        النظارة جاهزة للاستلام — إشعار واتساب للعميل: {pendingDispatch.customer.name}
+                      </span>
+                      {pendingDispatch.customer.phone && (
+                        <span
+                          dir="ltr"
+                          className="font-mono-num text-xs bg-white/80 dark:bg-slate-900/60 px-2 py-0.5 rounded-lg border border-emerald-200 dark:border-emerald-800"
+                        >
+                          {pendingDispatch.customer.phone}
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-xs text-slate-700 dark:text-slate-200 mt-1 whitespace-pre-line leading-relaxed">
+                      {pendingDispatch.message}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPendingDispatch(null)}
+                    aria-label="إغلاق إشعار العميل"
+                    className="text-xs font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 px-2 py-1 cursor-pointer"
+                  >
+                    إغلاق ✕
+                  </button>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <a
+                    href={pendingDispatch.waUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="min-h-[42px] px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-bold inline-flex items-center gap-1.5 transition-colors"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    <span>إرسال إشعار واتساب للعميل</span>
+                  </a>
+                  {pendingDispatch.smsUrl && (
+                    <a
+                      href={pendingDispatch.smsUrl}
+                      className="min-h-[42px] px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs sm:text-sm font-bold inline-flex items-center gap-1.5 transition-colors"
+                    >
+                      <MessageSquare className="w-4 h-4" />
+                      <span>إرسال SMS</span>
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void navigator.clipboard?.writeText(pendingDispatch.message).catch(() => {});
+                      showToast('تم نسخ رسالة الجاهزية');
+                    }}
+                    className="min-h-[42px] px-3.5 py-2 rounded-xl bg-white dark:bg-[#15232f] border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Copy className="w-4 h-4" />
+                    <span>نسخ الرسالة</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
           {routeState.page === 'customers' && (
             <CustomersPage
               customers={store.customers}
               onAddCustomer={handleOpenAdd}
               onEditCustomer={handleOpenEdit}
               onDeleteCustomer={store.deleteCustomer}
+              onChangeStage={handleAdvanceStage}
               onOpenOrder={(c) => {
                 if (store.settings.autoWhatsApp) {
                   prepareWhatsAppDispatch(c);
@@ -299,10 +386,6 @@ function MidoOpticsApp() {
               onLoadSampleData={store.loadSampleData}
               onToast={showToast}
             />
-          )}
-
-          {routeState.page === 'loyalty' && (
-            <LoyaltyPage customers={store.customers} />
           )}
 
           {routeState.page === 'orders' && (
@@ -352,6 +435,16 @@ function MidoOpticsApp() {
             />
           )}
 
+          {routeState.page === 'prices' && (
+            <PriceListPage
+              items={store.priceItems}
+              onSaveItem={store.savePriceItem}
+              onDeleteItem={store.deletePriceItem}
+              onLoadStarterPrices={store.loadStarterPriceItems}
+              onToast={showToast}
+            />
+          )}
+
           {routeState.page === 'stats' && (
             <StatsDashboardPage customers={store.customers} />
           )}
@@ -361,6 +454,12 @@ function MidoOpticsApp() {
           isOpen={formOpen}
           editingCustomer={editingCustomer}
           lensInventory={lensBridge.inventory}
+          priceItems={store.priceItems}
+          onOpenPriceList={() => {
+            setFormOpen(false);
+            setEditingCustomer(null);
+            navigate('prices');
+          }}
           onClose={() => {
             setFormOpen(false);
             setEditingCustomer(null);
