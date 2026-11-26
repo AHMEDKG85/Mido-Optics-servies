@@ -9,6 +9,9 @@ import {
   PickupReminderSummary,
   PriceItem,
   PriceItemCategory,
+  REPAIR_STAGES,
+  RepairRecord,
+  UsageType,
 } from '../types/optics';
 
 export function clampNumber(value: unknown, min = 0, max = 10_000_000): number {
@@ -324,6 +327,17 @@ export function sanitizeFramePhoto(rawPhoto: unknown): string {
   return str.startsWith('data:image/') && str.length <= 350_000 ? str : '';
 }
 
+export function sanitizeAddPower(raw: unknown): string {
+  return String(raw ?? '').trim().slice(0, 16);
+}
+
+export function normalizeUsageType(raw: unknown): UsageType {
+  if (raw === 'distance' || raw === 'reading') {
+    return raw;
+  }
+  return '';
+}
+
 export function normalizeCustomerRecord(raw: unknown): CustomerRecord | null {
   if (!raw || typeof raw !== 'object') return null;
   const obj = raw as Record<string, unknown>;
@@ -358,11 +372,43 @@ export function normalizeCustomerRecord(raw: unknown): CustomerRecord | null {
     photo: safePhoto,
     r: sanitizeEyeTuple(obj.r),
     l: sanitizeEyeTuple(obj.l),
+    add: sanitizeAddPower(obj.add),
+    usageType: normalizeUsageType(obj.usageType),
     status: statusNum,
     hist,
     tok: sanitizeToken(obj.tok),
     pickupDate: sanitizePickupDate(obj.pickupDate),
     delivered: Boolean(obj.delivered),
+  };
+}
+
+export function applyCustomerDeliverySettlement(
+  record: CustomerRecord,
+  nowMs = Date.now()
+): CustomerRecord {
+  const safeTotal = clampNumber(record.total);
+  const safePaid = clampNumber(record.paid);
+  return {
+    ...record,
+    status: 4,
+    hist: record.status >= 4 ? record.hist : advanceHist(record.hist, 4, nowMs),
+    paid: Math.max(safePaid, safeTotal),
+    delivered: true,
+  };
+}
+
+export function applyRepairDeliverySettlement(
+  record: RepairRecord,
+  nowMs = Date.now()
+): RepairRecord {
+  const safeCost = clampNumber(record.cost);
+  const safePaid = clampNumber(record.paid);
+  return {
+    ...record,
+    status: 4,
+    hist: record.status >= 4 ? record.hist : advanceHist(record.hist, 4, nowMs),
+    paid: Math.max(safePaid, safeCost),
+    delivered: true,
   };
 }
 
@@ -1051,15 +1097,20 @@ export function buildSinglePagePdfFromJpeg(params: {
   jpegBytes: Uint8Array;
   imageWidth: number;
   imageHeight: number;
+  paperFormat?: 'a4' | 'thermal-80mm';
 }): Uint8Array {
-  const { jpegBytes, imageWidth, imageHeight } = params;
-  const pageWidth = 595.28;
-  const pageHeight = 841.89;
-  const margin = 20;
-  const availW = pageWidth - margin * 2;
-  const availH = pageHeight - margin * 2;
+  const { jpegBytes, imageWidth, imageHeight, paperFormat = 'a4' } = params;
   const safeW = Math.max(1, imageWidth);
   const safeH = Math.max(1, imageHeight);
+  const isThermal = paperFormat === 'thermal-80mm';
+  // 80mm thermal roll width = 226.77pt
+  const pageWidth = isThermal ? 226.77 : 595.28;
+  const margin = isThermal ? 6 : 20;
+  const availW = pageWidth - margin * 2;
+  const pageHeight = isThermal
+    ? Math.max(240, Math.round((availW * (safeH / safeW) + margin * 2) * 100) / 100)
+    : 841.89;
+  const availH = pageHeight - margin * 2;
   const scale = Math.min(availW / safeW, availH / safeH);
   const drawW = safeW * scale;
   const drawH = safeH * scale;
@@ -1284,6 +1335,270 @@ export const STARTER_PRICE_ITEMS: PriceItem[] = [
     notes: 'خدمة فورية بالفرع',
     createdAtMs: 1764000008000,
     updatedAtMs: 1764000008000,
+  },
+];
+
+export function generateRepairId(): string {
+  return `r_${Date.now()}_${generateToken(4)}`;
+}
+
+export function normalizeRepairRecord(raw: unknown): RepairRecord | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  const name = String(obj.name ?? '').trim().slice(0, 120);
+  if (!name) return null;
+
+  const rawDate = String(obj.date ?? '').trim();
+  const parsedDate =
+    rawDate && !Number.isNaN(Date.parse(rawDate))
+      ? new Date(rawDate).toISOString().slice(0, 40)
+      : new Date().toISOString();
+
+  const statusNum = Math.trunc(clampNumber(obj.status, 0, REPAIR_STAGES.length - 1));
+  const hist = sanitizeHist(obj.hist);
+  if (hist.length === 0) {
+    hist[0] = Date.parse(parsedDate) || Date.now();
+  }
+
+  return {
+    id: sanitizeId(obj.id, 'r'),
+    ownerId: obj.ownerId ? String(obj.ownerId).slice(0, 128) : undefined,
+    date: parsedDate,
+    name,
+    phone: String(obj.phone ?? '').trim().slice(0, 30),
+    glassesType: String(obj.glassesType ?? '').trim().slice(0, 120),
+    weldingType: String(obj.weldingType ?? '').trim().slice(0, 120),
+    representativeName: String(obj.representativeName ?? '').trim().slice(0, 120),
+    cost: clampNumber(obj.cost),
+    paid: clampNumber(obj.paid),
+    notes: String(obj.notes ?? '').trim().slice(0, 240),
+    status: statusNum,
+    hist,
+    tok: sanitizeToken(obj.tok),
+    pickupDate: sanitizePickupDate(obj.pickupDate),
+    delivered: Boolean(obj.delivered),
+  };
+}
+
+export function filterRepairs(
+  repairs: RepairRecord[],
+  query = ''
+): RepairRecord[] {
+  const trimmed = query.trim().toLowerCase();
+  return repairs
+    .filter((r) => {
+      if (!trimmed) return true;
+      return (
+        r.name.toLowerCase().includes(trimmed) ||
+        r.phone.toLowerCase().includes(trimmed) ||
+        r.glassesType.toLowerCase().includes(trimmed) ||
+        r.weldingType.toLowerCase().includes(trimmed) ||
+        r.representativeName.toLowerCase().includes(trimmed) ||
+        r.tok.toLowerCase().includes(trimmed)
+      );
+    })
+    .sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
+}
+
+export function buildRepairTrackingUrl(
+  origin: string,
+  pathname: string,
+  tok: string,
+  customBaseUrl?: string
+): string {
+  const trimmedCustom = String(customBaseUrl || '').trim().replace(/\/+$/, '');
+  if (trimmedCustom) {
+    return `${trimmedCustom}/#rtrack-${tok}`;
+  }
+  const cleanOrigin = resolvePublicOrigin(origin);
+  const cleanPath = pathname === '/' ? '' : pathname.replace(/\/+$/, '');
+  return `${cleanOrigin}${cleanPath}/#rtrack-${tok}`;
+}
+
+export function renderRepairWhatsAppMessage(params: {
+  repair: Pick<
+    RepairRecord,
+    'name' | 'glassesType' | 'weldingType' | 'representativeName' | 'cost' | 'paid' | 'status'
+  >;
+  trackingUrl: string;
+  shopName?: string;
+}): string {
+  const { repair, trackingUrl, shopName = 'Mido Optics' } = params;
+  const stageIndex = Math.max(0, Math.min(REPAIR_STAGES.length - 1, repair.status || 0));
+  const stageLabel = REPAIR_STAGES[stageIndex];
+  const remaining = calculateRemaining(repair.cost, repair.paid);
+  const workDetails = [repair.glassesType, repair.weldingType].filter(Boolean).join(' · ');
+  const detailLine = workDetails ? `\nتفاصيل التصليح: ${workDetails}.` : '';
+  const repLine = repair.representativeName
+    ? `\nالمندوب المسؤول: ${repair.representativeName}.`
+    : '';
+  const paymentLine =
+    remaining > 0
+      ? `\nالمبلغ المتبقي: ${remaining} جنيه.`
+      : repair.cost > 0
+      ? '\nالحساب: خالص.'
+      : '';
+  return `أهلاً ${repair.name || 'عميلنا العزيز'}، طلب التصليح الخاص بك في ${shopName} وصل الآن لمرحلة: «${stageLabel}».${detailLine}${repLine}${paymentLine}\nتابع حالة التصليح خطوة بخطوة من هنا:\n${trackingUrl}`;
+}
+
+export function renderRepairReadyMessage(params: {
+  repair: Pick<
+    RepairRecord,
+    'name' | 'glassesType' | 'weldingType' | 'representativeName' | 'cost' | 'paid'
+  >;
+  trackingUrl: string;
+  shopName?: string;
+}): string {
+  const { repair, trackingUrl, shopName = 'Mido Optics' } = params;
+  const remaining = calculateRemaining(repair.cost, repair.paid);
+  const workDetails = [repair.glassesType, repair.weldingType].filter(Boolean).join(' · ');
+  const detailLine = workDetails ? `\nتفاصيل التصليح: ${workDetails}.` : '';
+  const paymentLine =
+    remaining > 0
+      ? `\nالمبلغ المتبقي عند الاستلام: ${remaining} جنيه.`
+      : repair.cost > 0
+      ? '\nالمبلغ مسدد بالكامل (خالص).'
+      : '';
+  return `أهلاً ${repair.name || 'عميلنا العزيز'}، يسعدنا إبلاغك بأن تصليح نظارتك في ${shopName} أصبح جاهزاً للاستلام الآن!${detailLine}\nمن فضلك توجّه إلى الفرع لاستلام النظارة.${paymentLine}\nرابط المتابعة:\n${trackingUrl}`;
+}
+
+export function buildRepairStageWhatsAppDispatch(params: {
+  repair: Pick<
+    RepairRecord,
+    'name' | 'phone' | 'glassesType' | 'weldingType' | 'representativeName' | 'cost' | 'paid' | 'status'
+  >;
+  trackingUrl: string;
+  shopName?: string;
+  forceReadyMessage?: boolean;
+}): {
+  message: string;
+  waUrl: string;
+  smsUrl: string;
+  isReadyNotification: boolean;
+} {
+  const isReadyNotification = Boolean(
+    params.forceReadyMessage || params.repair.status === 4
+  );
+  const message = isReadyNotification
+    ? renderRepairReadyMessage({
+        repair: params.repair,
+        trackingUrl: params.trackingUrl,
+        shopName: params.shopName,
+      })
+    : renderRepairWhatsAppMessage({
+        repair: params.repair,
+        trackingUrl: params.trackingUrl,
+        shopName: params.shopName,
+      });
+  const phone = formatEgyptianWhatsAppPhone(params.repair.phone);
+  const encoded = encodeURIComponent(message);
+  const waUrl = phone ? `https://wa.me/${phone}?text=${encoded}` : `https://wa.me/?text=${encoded}`;
+  const smsUrl = buildSmsUrl(params.repair.phone, message);
+
+  return {
+    message,
+    waUrl,
+    smsUrl,
+    isReadyNotification,
+  };
+}
+
+export function buildRepairWhatsAppUrl(params: {
+  repair: Pick<
+    RepairRecord,
+    'name' | 'phone' | 'glassesType' | 'weldingType' | 'representativeName' | 'cost' | 'paid' | 'status'
+  >;
+  trackingUrl: string;
+  shopName?: string;
+  preferReadyMessage?: boolean;
+}): string {
+  return buildRepairStageWhatsAppDispatch({
+    repair: params.repair,
+    trackingUrl: params.trackingUrl,
+    shopName: params.shopName,
+    forceReadyMessage: params.preferReadyMessage !== false && params.repair.status === 4,
+  }).waUrl;
+}
+
+export interface RepairStatsSummary {
+  totalRepairs: number;
+  activeCount: number;
+  readyCount: number;
+  deliveredCount: number;
+  totalRevenue: number;
+  totalCollected: number;
+  totalRemaining: number;
+}
+
+export function calculateRepairStats(repairs: RepairRecord[]): RepairStatsSummary {
+  let activeCount = 0;
+  let readyCount = 0;
+  let deliveredCount = 0;
+  let totalRevenue = 0;
+  let totalCollected = 0;
+
+  for (const r of repairs) {
+    if (r.delivered) {
+      deliveredCount += 1;
+    } else {
+      activeCount += 1;
+      if (r.status >= 4) readyCount += 1;
+    }
+    totalRevenue += clampNumber(r.cost);
+    totalCollected += clampNumber(r.paid);
+  }
+
+  return {
+    totalRepairs: repairs.length,
+    activeCount,
+    readyCount,
+    deliveredCount,
+    totalRevenue: Math.round(totalRevenue * 100) / 100,
+    totalCollected: Math.round(totalCollected * 100) / 100,
+    totalRemaining: Math.round((totalRevenue - totalCollected) * 100) / 100,
+  };
+}
+
+export const SAMPLE_REPAIRS: RepairRecord[] = [
+  {
+    id: 'demo_rep_1795652001',
+    date: new Date(Date.now() - 86_400_000).toISOString(),
+    name: 'كريم عبد الله',
+    phone: '01098765432',
+    glassesType: 'شمبر معدن تيتانيوم',
+    weldingType: 'لحام ليزر للذراع الأيمن',
+    representativeName: 'محمود سعيد',
+    cost: 250,
+    paid: 100,
+    notes: 'استلام سريع ومراجعة الوسادات',
+    status: 2,
+    hist: [Date.now() - 86_400_000, Date.now() - 50_000_000, Date.now() - 12_000_000],
+    tok: 'repdemo91a',
+    pickupDate: new Date(Date.now() + 86_400_000).toISOString().slice(0, 10),
+    delivered: false,
+  },
+  {
+    id: 'demo_rep_1795652002',
+    date: new Date(Date.now() - 36_000_000).toISOString(),
+    name: 'منى طارق',
+    phone: '01234567890',
+    glassesType: 'نظارة شمس أسيتات',
+    weldingType: 'تغيير سوستة المفصل',
+    representativeName: 'إسلام حسن',
+    cost: 180,
+    paid: 180,
+    notes: '',
+    status: 4,
+    hist: [
+      Date.now() - 36_000_000,
+      Date.now() - 28_000_000,
+      Date.now() - 20_000_000,
+      Date.now() - 10_000_000,
+      Date.now() - 3_600_000,
+    ],
+    tok: 'repdemo44b',
+    pickupDate: new Date().toISOString().slice(0, 10),
+    delivered: false,
   },
 ];
 

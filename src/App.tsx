@@ -8,20 +8,28 @@ import {
   OrdersWhatsAppPage,
   WhatsAppDispatchItem,
 } from './components/OrdersWhatsAppPage';
+import { RepairsPage } from './components/RepairsPage';
+import {
+  RepairOrdersWhatsAppPage,
+  RepairWhatsAppDispatchItem,
+} from './components/RepairOrdersWhatsAppPage';
 import { ArchivePage } from './components/ArchivePage';
 import { PriceListPage } from './components/PriceListPage';
 import { StatsDashboardPage } from './components/StatsDashboardPage';
 import { CustomerFormModal } from './components/CustomerFormModal';
+import { RepairFormModal } from './components/RepairFormModal';
 import { OrderDetailModal } from './components/OrderDetailModal';
 import { InvoiceModal } from './components/InvoiceModal';
 import { CustomerTrackView } from './components/CustomerTrackView';
-import { CustomerInput, useOpticsStore } from './hooks/useOpticsStore';
+import { CustomerInput, RepairInput, useOpticsStore } from './hooks/useOpticsStore';
 import { useLensInventory } from './hooks/useLensInventory';
 import { usePickupNotifications } from './hooks/usePickupNotifications';
 import { signInWithGoogle, signOutUser } from './lib/firebase';
-import { AppPage, CustomerRecord } from './types/optics';
+import { AppPage, CustomerRecord, NavPage, RepairRecord } from './types/optics';
 import {
   AuthErrorSummary,
+  buildRepairStageWhatsAppDispatch,
+  buildRepairTrackingUrl,
   buildStageWhatsAppDispatch,
   buildTrackingUrl,
   formatFirebaseAuthError,
@@ -32,8 +40,13 @@ function parseHashRoute(hash: string): { page: AppPage; trackToken: string | nul
   if (clean.startsWith('track-')) {
     return { page: 'track', trackToken: clean.slice(6) };
   }
+  if (clean.startsWith('rtrack-')) {
+    return { page: 'rtrack', trackToken: clean.slice(7) };
+  }
   if (
     clean === 'orders' ||
+    clean === 'repairs' ||
+    clean === 'repair-orders' ||
     clean === 'archive' ||
     clean === 'prices' ||
     clean === 'stats' ||
@@ -69,12 +82,17 @@ function MidoOpticsApp() {
   );
   const [formOpen, setFormOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<CustomerRecord | null>(null);
+  const [repairFormOpen, setRepairFormOpen] = useState(false);
+  const [editingRepair, setEditingRepair] = useState<RepairRecord | null>(null);
   const [orderModalCustomerId, setOrderModalCustomerId] = useState<string | null>(null);
   const [invoiceCustomerId, setInvoiceCustomerId] = useState<string | null>(null);
+  const [invoiceRepairId, setInvoiceRepairId] = useState<string | null>(null);
   const [pendingDispatch, setPendingDispatch] = useState<WhatsAppDispatchItem | null>(null);
+  const [pendingRepairDispatch, setPendingRepairDispatch] =
+    useState<RepairWhatsAppDispatchItem | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [authError, setAuthError] = useState<AuthErrorSummary | null>(null);
-  const previousPageRef = useRef<Exclude<AppPage, 'track'>>('customers');
+  const previousPageRef = useRef<NavPage>('customers');
 
   const lensBridge = useLensInventory();
 
@@ -95,12 +113,13 @@ function MidoOpticsApp() {
     const onHashChange = () => {
       const nextRoute = parseHashRoute(window.location.hash);
       setRouteState((prev) => {
-        if (prev.page !== 'track') {
+        if (prev.page !== 'track' && prev.page !== 'rtrack') {
           previousPageRef.current = prev.page;
         }
         return nextRoute;
       });
       setFormOpen(false);
+      setRepairFormOpen(false);
       setOrderModalCustomerId(null);
     };
     window.addEventListener('hashchange', onHashChange);
@@ -117,7 +136,7 @@ function MidoOpticsApp() {
     return () => window.clearTimeout(timer);
   }, [toastMsg]);
 
-  const navigate = useCallback((page: Exclude<AppPage, 'track'>) => {
+  const navigate = useCallback((page: NavPage) => {
     previousPageRef.current = page;
     window.location.hash = `#${page}`;
     setRouteState({ page, trackToken: null });
@@ -160,6 +179,38 @@ function MidoOpticsApp() {
       return dispatch;
     },
     [store.settings.waTemplate, store.settings.shopName, store.settings.publicBaseUrl]
+  );
+
+  const prepareRepairWhatsAppDispatch = useCallback(
+    (record: RepairRecord, options?: { readyPickup?: boolean }) => {
+      const origin = window.location.origin;
+      const pathname = window.location.pathname;
+      const trackingUrl = buildRepairTrackingUrl(
+        origin,
+        pathname,
+        record.tok,
+        store.settings.publicBaseUrl
+      );
+      const dispatch = buildRepairStageWhatsAppDispatch({
+        repair: record,
+        trackingUrl,
+        shopName: store.settings.shopName,
+        forceReadyMessage: options?.readyPickup,
+      });
+
+      setPendingRepairDispatch({
+        repair: record,
+        trackingUrl,
+        waUrl: dispatch.waUrl,
+        smsUrl: dispatch.smsUrl,
+        message: dispatch.message,
+        isReadyNotification: dispatch.isReadyNotification,
+        triggeredAt: Date.now(),
+      });
+
+      return dispatch;
+    },
+    [store.settings.shopName, store.settings.publicBaseUrl]
   );
 
   const handleOpenAdd = () => {
@@ -224,13 +275,91 @@ function MidoOpticsApp() {
     if (pendingDispatch?.customer.id === customerId) {
       setPendingDispatch(null);
     }
-    showToast(`تم تسليم نظارة ${updated.name} ونقلها إلى أرشيف الطلبات مع بقائها في صفحة العملاء`);
+    showToast(
+      `تم استلام نظارة ${updated.name} وتحصيل المتبقي (خالص) ونقل الطلب إلى الأرشيف والإحصائيات`
+    );
   };
 
   const handleRestoreOrder = (customerId: string) => {
     const updated = store.restoreCustomerOrder(customerId);
     if (!updated) return;
     showToast(`تم استرجاع طلب ${updated.name} إلى الطلبات النشطة`);
+  };
+
+  // Repair Handlers
+  const handleOpenAddRepair = () => {
+    setEditingRepair(null);
+    setRepairFormOpen(true);
+  };
+
+  const handleOpenEditRepair = (repair: RepairRecord) => {
+    setEditingRepair(repair);
+    setRepairFormOpen(true);
+  };
+
+  const handleSaveRepair = (input: RepairInput) => {
+    const { record, isNew } = store.saveRepair(input);
+    setRepairFormOpen(false);
+    setEditingRepair(null);
+
+    if (isNew) {
+      if (store.settings.autoWhatsApp) {
+        prepareRepairWhatsAppDispatch(record);
+        navigate('repair-orders');
+        showToast('تم تسجيل التصليح وتجهيز رسالة المتابعة عبر واتساب');
+      } else {
+        showToast('تم تسجيل التصليح بنجاح');
+      }
+    } else {
+      showToast('تم تحديث بيانات التصليح بنجاح');
+    }
+  };
+
+  const handleAdvanceRepairStage = (repairId: string, nextStage: number) => {
+    const previous = store.repairs.find((r) => r.id === repairId);
+    const updated = store.updateRepairStage(repairId, nextStage);
+    if (!updated) return;
+    const isMovingBack = previous ? updated.status < previous.status : false;
+
+    if (updated.status === 4) {
+      const dispatch = prepareRepairWhatsAppDispatch(updated, { readyPickup: true });
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        void navigator.clipboard.writeText(dispatch.message).catch(() => {});
+      }
+      showToast('التصليح جاهز للاستلام — تم تجهيز إشعار واتساب التلقائي للعميل');
+      return;
+    }
+
+    if (store.settings.autoWhatsApp) {
+      prepareRepairWhatsAppDispatch(updated);
+      showToast(
+        isMovingBack
+          ? 'تم الرجوع للمرحلة السابقة وتحديث رسالة متابعة التصليح'
+          : 'تم تحديث مرحلة التصليح وتجهيز رسالة واتساب'
+      );
+    } else {
+      showToast(isMovingBack ? 'تم الرجوع للمرحلة السابقة' : 'تم تحديث حالة التصليح');
+    }
+  };
+
+  const handleMarkRepairDelivered = (repairId: string) => {
+    const updated = store.markRepairDelivered(repairId);
+    if (!updated) return;
+    if (pendingRepairDispatch?.repair.id === repairId) {
+      setPendingRepairDispatch(null);
+    }
+    showToast(`تم تسليم تصليح ${updated.name} وتسوية الحساب إلى خالص في الإحصائيات`);
+  };
+
+  const handleRestoreRepair = (repairId: string) => {
+    const updated = store.restoreRepairOrder(repairId);
+    if (!updated) return;
+    showToast(`تم استرجاع تصليح ${updated.name} إلى المتابعة النشطة`);
+  };
+
+  const handleOpenRepairFollowUp = (repair: RepairRecord) => {
+    prepareRepairWhatsAppDispatch(repair);
+    navigate('repair-orders');
   };
 
   const handleSignIn = async () => {
@@ -252,12 +381,17 @@ function MidoOpticsApp() {
     showToast('تم تسجيل الخروج');
   };
 
-  // Public Customer Tracking Route (#track-<tok>)
-  if (routeState.page === 'track' && routeState.trackToken) {
+  // Public Customer or Repair Tracking Route (#track-<tok> / #rtrack-<tok>)
+  if (
+    (routeState.page === 'track' || routeState.page === 'rtrack') &&
+    routeState.trackToken
+  ) {
     return (
       <CustomerTrackView
         token={routeState.trackToken}
+        mode={routeState.page === 'rtrack' ? 'repair' : 'customer'}
         localCustomers={store.customers}
+        localRepairs={store.repairs}
         onBack={() => navigate(previousPageRef.current)}
       />
     );
@@ -268,6 +402,9 @@ function MidoOpticsApp() {
     : null;
   const invoiceCustomer = invoiceCustomerId
     ? store.customers.find((c) => c.id === invoiceCustomerId) ?? null
+    : null;
+  const invoiceRepair = invoiceRepairId
+    ? store.repairs.find((r) => r.id === invoiceRepairId) ?? null
     : null;
 
   return (
@@ -366,6 +503,78 @@ function MidoOpticsApp() {
               </div>
             )}
 
+          {pendingRepairDispatch?.isReadyNotification &&
+            routeState.page !== 'repair-orders' && (
+              <div
+                role="region"
+                aria-label="إشعار واتساب جاهز لتصليح العميل"
+                className="mb-4 rounded-2xl border border-emerald-400 dark:border-emerald-600 bg-emerald-50 dark:bg-emerald-950/45 p-4 space-y-3 shadow-sm"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="text-xs sm:text-sm font-extrabold text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5 flex-wrap">
+                      <span>
+                        التصليح جاهز للاستلام — إشعار واتساب للعميل:{' '}
+                        {pendingRepairDispatch.repair.name}
+                      </span>
+                      {pendingRepairDispatch.repair.phone && (
+                        <span
+                          dir="ltr"
+                          className="font-mono-num text-xs bg-white/80 dark:bg-slate-900/60 px-2 py-0.5 rounded-lg border border-emerald-200 dark:border-emerald-800"
+                        >
+                          {pendingRepairDispatch.repair.phone}
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-xs text-slate-700 dark:text-slate-200 mt-1 whitespace-pre-line leading-relaxed">
+                      {pendingRepairDispatch.message}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPendingRepairDispatch(null)}
+                    aria-label="إغلاق إشعار التصليح"
+                    className="text-xs font-semibold text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 px-2 py-1 cursor-pointer"
+                  >
+                    إغلاق ✕
+                  </button>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <a
+                    href={pendingRepairDispatch.waUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="min-h-[42px] px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-bold inline-flex items-center gap-1.5 transition-colors"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    <span>إرسال إشعار واتساب للعميل</span>
+                  </a>
+                  {pendingRepairDispatch.smsUrl && (
+                    <a
+                      href={pendingRepairDispatch.smsUrl}
+                      className="min-h-[42px] px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs sm:text-sm font-bold inline-flex items-center gap-1.5 transition-colors"
+                    >
+                      <MessageSquare className="w-4 h-4" />
+                      <span>إرسال SMS</span>
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void navigator.clipboard
+                        ?.writeText(pendingRepairDispatch.message)
+                        .catch(() => {});
+                      showToast('تم نسخ رسالة جاهزية التصليح');
+                    }}
+                    className="min-h-[42px] px-3.5 py-2 rounded-xl bg-white dark:bg-[#15232f] border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Copy className="w-4 h-4" />
+                    <span>نسخ الرسالة</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
           {routeState.page === 'customers' && (
             <CustomersPage
               customers={store.customers}
@@ -381,7 +590,10 @@ function MidoOpticsApp() {
                   setOrderModalCustomerId(c.id);
                 }
               }}
-              onOpenInvoice={(c) => setInvoiceCustomerId(c.id)}
+              onOpenInvoice={(c) => {
+                setInvoiceRepairId(null);
+                setInvoiceCustomerId(c.id);
+              }}
               onImportCustomers={store.importCustomers}
               onLoadSampleData={store.loadSampleData}
               onToast={showToast}
@@ -421,7 +633,47 @@ function MidoOpticsApp() {
               onAdvanceStage={handleAdvanceStage}
               onMarkDelivered={handleMarkDelivered}
               onOpenOrderModal={(c) => setOrderModalCustomerId(c.id)}
-              onOpenInvoice={(c) => setInvoiceCustomerId(c.id)}
+              onOpenInvoice={(c) => {
+                setInvoiceRepairId(null);
+                setInvoiceCustomerId(c.id);
+              }}
+              onToast={showToast}
+            />
+          )}
+
+          {routeState.page === 'repairs' && (
+            <RepairsPage
+              repairs={store.repairs}
+              onAddRepair={handleOpenAddRepair}
+              onEditRepair={handleOpenEditRepair}
+              onDeleteRepair={store.deleteRepair}
+              onChangeStage={handleAdvanceRepairStage}
+              onOpenRepairFollowUp={handleOpenRepairFollowUp}
+              onOpenInvoice={(r) => {
+                setInvoiceCustomerId(null);
+                setInvoiceRepairId(r.id);
+              }}
+              onImportRepairs={store.importRepairs}
+              onLoadSampleRepairs={store.loadSampleRepairs}
+              onToast={showToast}
+            />
+          )}
+
+          {routeState.page === 'repair-orders' && (
+            <RepairOrdersWhatsAppPage
+              repairs={store.repairs}
+              settings={store.settings}
+              isCloudSignedIn={Boolean(store.user && store.user.emailVerified)}
+              pendingDispatch={pendingRepairDispatch}
+              onClearDispatch={() => setPendingRepairDispatch(null)}
+              onUpdateSettings={store.updateSettings}
+              onAdvanceStage={handleAdvanceRepairStage}
+              onMarkDelivered={handleMarkRepairDelivered}
+              onRestoreRepair={handleRestoreRepair}
+              onOpenInvoice={(r) => {
+                setInvoiceCustomerId(null);
+                setInvoiceRepairId(r.id);
+              }}
               onToast={showToast}
             />
           )}
@@ -431,7 +683,10 @@ function MidoOpticsApp() {
               customers={store.customers}
               onRestoreOrder={handleRestoreOrder}
               onOpenOrderModal={(c) => setOrderModalCustomerId(c.id)}
-              onOpenInvoice={(c) => setInvoiceCustomerId(c.id)}
+              onOpenInvoice={(c) => {
+                setInvoiceRepairId(null);
+                setInvoiceCustomerId(c.id);
+              }}
             />
           )}
 
@@ -446,7 +701,7 @@ function MidoOpticsApp() {
           )}
 
           {routeState.page === 'stats' && (
-            <StatsDashboardPage customers={store.customers} />
+            <StatsDashboardPage customers={store.customers} repairs={store.repairs} />
           )}
         </main>
 
@@ -468,6 +723,17 @@ function MidoOpticsApp() {
           onToast={showToast}
         />
 
+        <RepairFormModal
+          isOpen={repairFormOpen}
+          editingRepair={editingRepair}
+          onClose={() => {
+            setRepairFormOpen(false);
+            setEditingRepair(null);
+          }}
+          onSave={handleSaveRepair}
+          onToast={showToast}
+        />
+
         <OrderDetailModal
           customer={orderModalCustomer}
           settings={store.settings}
@@ -480,15 +746,22 @@ function MidoOpticsApp() {
             setOrderModalCustomerId(null);
             handleOpenEdit(c);
           }}
-          onOpenInvoice={(c) => setInvoiceCustomerId(c.id)}
+          onOpenInvoice={(c) => {
+            setInvoiceRepairId(null);
+            setInvoiceCustomerId(c.id);
+          }}
           onToast={showToast}
         />
       </div>
 
       <InvoiceModal
         customer={invoiceCustomer}
+        repair={invoiceRepair}
         settings={store.settings}
-        onClose={() => setInvoiceCustomerId(null)}
+        onClose={() => {
+          setInvoiceCustomerId(null);
+          setInvoiceRepairId(null);
+        }}
         onToast={showToast}
       />
 

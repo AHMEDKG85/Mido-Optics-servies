@@ -38,6 +38,15 @@
   font-variant-numeric: tabular-nums;
 }
 
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
@@ -48,15 +57,18 @@
 
 @media print {
   @page {
-    size: A4 portrait;
-    margin: 12mm;
+    size: 80mm auto;
+    margin: 2mm;
   }
 
   html, body {
+    width: 80mm !important;
     background: #ffffff !important;
     color: #0f172a !important;
     margin: 0 !important;
     padding: 0 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 
   body.printing-invoice .app-shell-print-hide {
@@ -67,14 +79,18 @@
     position: static !important;
     inset: auto !important;
     padding: 0 !important;
+    margin: 0 !important;
     background: transparent !important;
     backdrop-filter: none !important;
     display: block !important;
   }
 
   body.printing-invoice .invoice-print-dialog {
-    max-width: none !important;
+    width: 76mm !important;
+    max-width: 76mm !important;
     max-height: none !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
     overflow: visible !important;
     border: none !important;
     box-shadow: none !important;
@@ -83,10 +99,14 @@
   }
 
   body.printing-invoice .invoice-print-sheet {
-    border: 1px solid #cbd5e1 !important;
+    width: 76mm !important;
+    max-width: 76mm !important;
+    border: none !important;
+    border-radius: 0 !important;
     box-shadow: none !important;
     background: #ffffff !important;
     color: #0f172a !important;
+    font-size: 11px !important;
   }
 }
 

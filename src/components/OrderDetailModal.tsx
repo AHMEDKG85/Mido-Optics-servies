@@ -21,6 +21,7 @@ import {
   LensInventorySnapshot,
   ORDER_STAGES,
   ShopSettings,
+  USAGE_TYPE_LABELS,
 } from '../types/optics';
 import {
   buildStageWhatsAppDispatch,
@@ -175,6 +176,14 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
 
           {/* Eye Prescription Summary */}
           <div className="rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+            {customer.usageType && (
+              <div className="bg-[#f3f9fd] dark:bg-[#1b3042]/60 px-3 py-1.5 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between text-xs">
+                <span className="text-slate-500 dark:text-slate-400">نوع النظارة</span>
+                <span className="font-bold text-[#8f6c1e] dark:text-[#e8cf8b]">
+                  {USAGE_TYPE_LABELS[customer.usageType]}
+                </span>
+              </div>
+            )}
             <table className="w-full text-center text-xs font-mono-num" dir="ltr">
               <thead className="bg-[#e3f2fb] dark:bg-[#1b3042] text-[#8f6c1e] dark:text-[#e8cf8b]">
                 <tr>
@@ -201,6 +210,16 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                     </td>
                   ))}
                 </tr>
+                {customer.add && (
+                  <tr className="bg-[#f3f9fd]/70 dark:bg-[#1b3042]/40">
+                    <td className="py-1.5 px-2 font-bold text-[#8f6c1e] dark:text-[#e8cf8b]">
+                      ADD
+                    </td>
+                    <td colSpan={3} className="py-1.5 px-2 font-bold">
+                      {customer.add}
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>

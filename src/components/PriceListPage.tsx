@@ -657,7 +657,7 @@ export const PriceListPage: React.FC<PriceListPageProps> = ({
                             type="button"
                             onClick={() => startEdit(item)}
                             aria-label={`تعديل سعر ${item.name}`}
-                            className="min-h-[36px] px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-[#c9a24b] text-xs font-semibold text-slate-700 dark:text-slate-200 inline-flex items-center gap-1 whitespace-nowrap cursor-pointer"
+                            className="min-h-[36px] px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#192b3b] hover:border-[#c9a24b] text-xs font-semibold text-slate-700 dark:text-slate-200 inline-flex items-center gap-1 shadow-xs transition-all active:scale-[0.97] whitespace-nowrap cursor-pointer"
                           >
                             <Pencil className="w-3.5 h-3.5 text-[#c9a24b]" />
                             <span>تعديل</span>
@@ -669,7 +669,7 @@ export const PriceListPage: React.FC<PriceListPageProps> = ({
                               onToast(`تم حذف ${item.name} من قائمة الأسعار`);
                             }}
                             aria-label={`حذف ${item.name}`}
-                            className="min-h-[36px] min-w-[36px] rounded-lg border border-rose-200 dark:border-rose-900/60 bg-rose-50/70 dark:bg-rose-950/30 hover:bg-rose-100 dark:hover:bg-rose-950/60 text-rose-600 dark:text-rose-400 grid place-items-center cursor-pointer"
+                            className="min-h-[36px] min-w-[36px] rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50/70 dark:bg-rose-950/30 hover:bg-rose-600 hover:text-white text-rose-600 dark:text-rose-400 grid place-items-center shadow-xs transition-all active:scale-[0.97] cursor-pointer"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>

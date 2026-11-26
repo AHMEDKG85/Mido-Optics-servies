@@ -11,19 +11,25 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { BarChart3, CheckCircle2, Clock3, TrendingUp, Users, Wallet } from 'lucide-react';
-import { CustomerRecord } from '../types/optics';
+import { BarChart3, CheckCircle2, Clock3, TrendingUp, Users, Wallet, Wrench } from 'lucide-react';
+import { CustomerRecord, RepairRecord } from '../types/optics';
 import {
   calculateMonthlyCustomerGrowth,
   calculateOrderReadinessStats,
+  calculateRepairStats,
 } from '../utils/optics';
 
 interface StatsDashboardPageProps {
   customers: CustomerRecord[];
+  repairs?: RepairRecord[];
 }
 
-export const StatsDashboardPage: React.FC<StatsDashboardPageProps> = ({ customers }) => {
+export const StatsDashboardPage: React.FC<StatsDashboardPageProps> = ({
+  customers,
+  repairs = [],
+}) => {
   const readiness = useMemo(() => calculateOrderReadinessStats(customers), [customers]);
+  const repairStats = useMemo(() => calculateRepairStats(repairs), [repairs]);
   const monthlyGrowth = useMemo(
     () => calculateMonthlyCustomerGrowth(customers),
     [customers]
@@ -36,12 +42,16 @@ export const StatsDashboardPage: React.FC<StatsDashboardPageProps> = ({ customer
 
   const latestGrowth =
     monthlyGrowth.length > 0 ? monthlyGrowth[monthlyGrowth.length - 1] : null;
+  const combinedCollected =
+    Math.round((readiness.totalCollected + repairStats.totalCollected) * 100) / 100;
+  const combinedRemaining =
+    Math.round((readiness.totalRemaining + repairStats.totalRemaining) * 100) / 100;
 
   return (
     <section aria-label="لوحة الإحصائيات والبيانات" className="space-y-5">
       {/* KPI Summary Strip */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#15232f] p-4 space-y-1.5">
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#15232f] p-4 space-y-1.5 shadow-xs">
           <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
             <span>إجمالي النظارات / العملاء</span>
             <Users className="w-4 h-4 text-[#c9a24b]" />
@@ -52,7 +62,7 @@ export const StatsDashboardPage: React.FC<StatsDashboardPageProps> = ({ customer
           </p>
         </div>
 
-        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#15232f] p-4 space-y-1.5">
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#15232f] p-4 space-y-1.5 shadow-xs">
           <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
             <span>النظارات الجاهزة</span>
             <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
@@ -61,11 +71,11 @@ export const StatsDashboardPage: React.FC<StatsDashboardPageProps> = ({ customer
             {readiness.readyCount}
           </p>
           <p className="text-[11px] text-slate-500 dark:text-slate-400">
-            جاهزة للاستلام من المحل
+            جاهزة للاستلام أو تم تسليمها
           </p>
         </div>
 
-        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#15232f] p-4 space-y-1.5">
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#15232f] p-4 space-y-1.5 shadow-xs">
           <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
             <span>تحت التنفيذ</span>
             <Clock3 className="w-4 h-4 text-[#c9a24b]" />
@@ -78,26 +88,87 @@ export const StatsDashboardPage: React.FC<StatsDashboardPageProps> = ({ customer
           </p>
         </div>
 
-        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#15232f] p-4 space-y-1.5">
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#15232f] p-4 space-y-1.5 shadow-xs">
           <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
-            <span>النمو الشهري والإيرادات</span>
+            <span>إجمالي المحصّل والمتبقي</span>
             <Wallet className="w-4 h-4 text-[#c9a24b]" />
           </div>
-          <p className="text-2xl font-extrabold tabular-nums">
-            {readiness.totalCollected.toLocaleString('ar-EG')} ج
+          <p className="text-2xl font-extrabold tabular-nums text-emerald-700 dark:text-emerald-400">
+            {readiness.totalCollected.toLocaleString('en-US')} ج
           </p>
-          <p className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
-            {latestGrowth && latestGrowth.growthPercent !== null
-              ? `نمو الشهر الأخير: ${latestGrowth.growthPercent >= 0 ? '+' : ''}${latestGrowth.growthPercent}%`
-              : `المتبقي للتحصيل: ${readiness.totalRemaining.toLocaleString('ar-EG')} ج`}
-          </p>
+          <div className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums space-y-0.5">
+            <p className={readiness.totalRemaining > 0 ? 'text-rose-600 dark:text-rose-400 font-semibold' : 'text-emerald-700 dark:text-emerald-400 font-semibold'}>
+              المتبقي للتحصيل: {readiness.totalRemaining.toLocaleString('en-US')} ج
+            </p>
+            {latestGrowth && latestGrowth.growthPercent !== null && (
+              <p>
+                نمو الشهر الأخير: {latestGrowth.growthPercent >= 0 ? '+' : ''}
+                {latestGrowth.growthPercent}%
+              </p>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* Repairs & Combined Shop Revenue Summary */}
+      {repairStats.totalRepairs > 0 && (
+        <div
+          aria-label="ملخص إيرادات التصليحات والإجمالي العام"
+          className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#15232f] p-4 sm:p-5 space-y-3 shadow-xs"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm sm:text-base font-extrabold flex items-center gap-2">
+              <Wrench className="w-4 h-4 text-[#c9a24b]" />
+              <span>إحصائيات التصليحات والإجمالي العام للمحل</span>
+            </h2>
+            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 tabular-nums">
+              إجمالي التصليحات: {repairStats.totalRepairs} · نشطة: {repairStats.activeCount} · مُسلّمة: {repairStats.deliveredCount}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 text-center tabular-nums">
+            <div className="rounded-xl bg-[#f3f9fd] dark:bg-[#1b3042]/70 px-3 py-2.5">
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">محصّل التصليحات</div>
+              <div className="text-base font-extrabold text-emerald-700 dark:text-emerald-400 mt-0.5">
+                {repairStats.totalCollected.toLocaleString('en-US')} ج
+              </div>
+            </div>
+            <div className="rounded-xl bg-[#f3f9fd] dark:bg-[#1b3042]/70 px-3 py-2.5">
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">متبقي التصليحات</div>
+              <div
+                className={`text-base font-extrabold mt-0.5 ${
+                  repairStats.totalRemaining > 0
+                    ? 'text-rose-700 dark:text-rose-400'
+                    : 'text-emerald-700 dark:text-emerald-400'
+                }`}
+              >
+                {repairStats.totalRemaining.toLocaleString('en-US')} ج
+              </div>
+            </div>
+            <div className="rounded-xl bg-emerald-50/80 dark:bg-emerald-950/35 border border-emerald-200/70 dark:border-emerald-800/60 px-3 py-2.5">
+              <div className="text-[11px] text-emerald-700 dark:text-emerald-300 font-semibold">
+                إجمالي المحصّل (نظارات + تصليحات)
+              </div>
+              <div className="text-base font-extrabold text-emerald-700 dark:text-emerald-300 mt-0.5">
+                {combinedCollected.toLocaleString('en-US')} ج
+              </div>
+            </div>
+            <div className="rounded-xl bg-[#f3f9fd] dark:bg-[#1b3042]/70 px-3 py-2.5">
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                إجمالي المتبقي العام
+              </div>
+              <div className="text-base font-extrabold text-slate-900 dark:text-white mt-0.5">
+                {combinedRemaining.toLocaleString('en-US')} ج
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {customers.length === 0 ? (
         <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#15232f] p-10 text-center space-y-2">
           <BarChart3 className="w-11 h-11 text-[#c9a24b] mx-auto opacity-80" />
-          <h2 className="text-base font-bold">لا توجد بيانات إحصائية بعد</h2>
+          <h2 className="text-base font-bold">لا توجد بيانات إحصائية للنظارات بعد</h2>
           <p className="text-sm text-slate-500 dark:text-slate-400">
             أضف عملاء من صفحة «العملاء» لعرض الرسوم البيانية للنظارات الجاهزة وتحت التنفيذ ونسبة النمو الشهري.
           </p>

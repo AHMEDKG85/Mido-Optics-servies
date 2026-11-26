@@ -1,5 +1,12 @@
 export type EyeTuple = [string, string, string];
 
+export type UsageType = 'distance' | 'reading' | '';
+
+export const USAGE_TYPE_LABELS: Record<Exclude<UsageType, ''>, string> = {
+  distance: 'مسافات',
+  reading: 'قراءة',
+};
+
 export interface CustomerRecord {
   id: string;
   ownerId?: string;
@@ -15,6 +22,8 @@ export interface CustomerRecord {
   photo: string;
   r: EyeTuple;
   l: EyeTuple;
+  add?: string;
+  usageType?: UsageType;
   status: number;
   hist: Array<number | null>;
   tok: string;
@@ -35,6 +44,44 @@ export interface TrackOrderRecord {
   ph: string;
   r: EyeTuple;
   l: EyeTuple;
+  add?: string;
+  usageType?: UsageType;
+  s: number;
+  h: Array<number | null>;
+  pickupDate: string;
+  delivered: boolean;
+}
+
+export interface RepairRecord {
+  id: string;
+  ownerId?: string;
+  date: string;
+  name: string;
+  phone: string;
+  glassesType: string;
+  weldingType: string;
+  representativeName: string;
+  cost: number;
+  paid: number;
+  notes: string;
+  status: number;
+  hist: Array<number | null>;
+  tok: string;
+  pickupDate: string;
+  delivered: boolean;
+}
+
+export interface RepairTrackRecord {
+  tok: string;
+  ownerId: string;
+  repairId: string;
+  shopName: string;
+  n: string;
+  glassesType: string;
+  weldingType: string;
+  representativeName: string;
+  cost: number;
+  paid: number;
   s: number;
   h: Array<number | null>;
   pickupDate: string;
@@ -85,7 +132,25 @@ export interface PendingPriceSyncOp {
   queuedAt: number;
 }
 
-export type AppPage = 'customers' | 'orders' | 'archive' | 'prices' | 'stats' | 'track';
+export interface PendingRepairSyncOp {
+  id: string;
+  type: 'upsert' | 'delete';
+  repairId: string;
+  record?: RepairRecord;
+  tok?: string;
+  queuedAt: number;
+}
+
+export type NavPage =
+  | 'customers'
+  | 'orders'
+  | 'repairs'
+  | 'repair-orders'
+  | 'archive'
+  | 'prices'
+  | 'stats';
+
+export type AppPage = NavPage | 'track' | 'rtrack';
 
 export type SyncState = 'synced' | 'syncing' | 'offline' | 'local-only' | 'error';
 
@@ -95,6 +160,14 @@ export const ORDER_STAGES = [
   'العدسات وصلت',
   'جاري تركيب النظارة',
   'النظارة جاهزة للاستلام',
+] as const;
+
+export const REPAIR_STAGES = [
+  'تم استلام النظارة للتصليح',
+  'جاري الفحص والتجهيز',
+  'تحت التصليح واللحام',
+  'جاري التلميع والمراجعة',
+  'التصليح جاهز للاستلام',
 ] as const;
 
 export const DEFAULT_WA_TEMPLATE =

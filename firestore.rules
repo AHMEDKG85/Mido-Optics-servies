@@ -53,7 +53,8 @@ service cloud.firestore {
         && data.keys().hasOnly([
           'id', 'ownerId', 'date', 'name', 'phone', 'frame', 'lens',
           'framePrice', 'lensPrice', 'total', 'paid', 'photo', 'r', 'l',
-          'status', 'hist', 'tok', 'pickupDate', 'delivered', 'createdAt', 'updatedAt'
+          'add', 'usageType', 'status', 'hist', 'tok', 'pickupDate', 'delivered',
+          'createdAt', 'updatedAt'
         ])
         && data.id is string && data.id == customerId && data.id.size() <= 64 && isValidId(data.id)
         && data.ownerId is string && data.ownerId == request.auth.uid && isValidId(data.ownerId)
@@ -69,6 +70,8 @@ service cloud.firestore {
         && data.photo is string && data.photo.size() <= 350000
         && isValidEyeTuple(data.r)
         && isValidEyeTuple(data.l)
+        && (!('add' in data) || (data.add is string && data.add.size() <= 16))
+        && (!('usageType' in data) || (data.usageType is string && data.usageType in ['distance', 'reading', '']))
         && data.status is int && data.status >= 0 && data.status <= 4
         && isValidHist(data.hist)
         && data.tok is string && data.tok.size() >= 8 && data.tok.size() <= 32 && isValidId(data.tok)
@@ -87,8 +90,8 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'tok', 'ownerId', 'customerId', 'shopName', 'n', 'frame', 'lens',
-          'total', 'paid', 'ph', 'r', 'l', 's', 'h', 'pickupDate', 'delivered',
-          'createdAt', 'updatedAt'
+          'total', 'paid', 'ph', 'r', 'l', 'add', 'usageType', 's', 'h',
+          'pickupDate', 'delivered', 'createdAt', 'updatedAt'
         ])
         && data.tok is string && data.tok == trackId && data.tok.size() >= 8 && data.tok.size() <= 32 && isValidId(data.tok)
         && data.ownerId is string && data.ownerId == request.auth.uid && isValidId(data.ownerId)
@@ -102,6 +105,8 @@ service cloud.firestore {
         && data.ph is string && data.ph.size() <= 350000
         && isValidEyeTuple(data.r)
         && isValidEyeTuple(data.l)
+        && (!('add' in data) || (data.add is string && data.add.size() <= 16))
+        && (!('usageType' in data) || (data.usageType is string && data.usageType in ['distance', 'reading', '']))
         && data.s is int && data.s >= 0 && data.s <= 4
         && isValidHist(data.h)
         && data.pickupDate is string && data.pickupDate.size() <= 20
@@ -147,6 +152,68 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidRepair(data, repairId) {
+      return data.keys().hasAll([
+          'id', 'ownerId', 'date', 'name', 'phone', 'glassesType', 'weldingType',
+          'representativeName', 'cost', 'paid', 'notes', 'status', 'hist', 'tok',
+          'pickupDate', 'delivered', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'ownerId', 'date', 'name', 'phone', 'glassesType', 'weldingType',
+          'representativeName', 'cost', 'paid', 'notes', 'status', 'hist', 'tok',
+          'pickupDate', 'delivered', 'createdAt', 'updatedAt'
+        ])
+        && data.id is string && data.id == repairId && data.id.size() <= 64 && isValidId(data.id)
+        && data.ownerId is string && data.ownerId == request.auth.uid && isValidId(data.ownerId)
+        && data.date is string && data.date.size() >= 10 && data.date.size() <= 40
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 120
+        && data.phone is string && data.phone.size() <= 30
+        && data.glassesType is string && data.glassesType.size() <= 120
+        && data.weldingType is string && data.weldingType.size() <= 120
+        && data.representativeName is string && data.representativeName.size() <= 120
+        && data.cost is number && data.cost >= 0 && data.cost <= 10000000
+        && data.paid is number && data.paid >= 0 && data.paid <= 10000000
+        && data.notes is string && data.notes.size() <= 240
+        && data.status is int && data.status >= 0 && data.status <= 4
+        && isValidHist(data.hist)
+        && data.tok is string && data.tok.size() >= 8 && data.tok.size() <= 32 && isValidId(data.tok)
+        && data.pickupDate is string && data.pickupDate.size() <= 20
+        && (data.pickupDate == '' || data.pickupDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$'))
+        && data.delivered is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidRepairTrack(data, trackId) {
+      return data.keys().hasAll([
+          'tok', 'ownerId', 'repairId', 'shopName', 'n', 'glassesType', 'weldingType',
+          'representativeName', 'cost', 'paid', 's', 'h', 'pickupDate', 'delivered',
+          'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'tok', 'ownerId', 'repairId', 'shopName', 'n', 'glassesType', 'weldingType',
+          'representativeName', 'cost', 'paid', 's', 'h', 'pickupDate', 'delivered',
+          'createdAt', 'updatedAt'
+        ])
+        && data.tok is string && data.tok == trackId && data.tok.size() >= 8 && data.tok.size() <= 32 && isValidId(data.tok)
+        && data.ownerId is string && data.ownerId == request.auth.uid && isValidId(data.ownerId)
+        && data.repairId is string && data.repairId.size() <= 64 && isValidId(data.repairId)
+        && data.shopName is string && data.shopName.size() >= 1 && data.shopName.size() <= 80
+        && data.n is string && data.n.size() >= 1 && data.n.size() <= 120
+        && data.glassesType is string && data.glassesType.size() <= 120
+        && data.weldingType is string && data.weldingType.size() <= 120
+        && data.representativeName is string && data.representativeName.size() <= 120
+        && data.cost is number && data.cost >= 0 && data.cost <= 10000000
+        && data.paid is number && data.paid >= 0 && data.paid <= 10000000
+        && data.s is int && data.s >= 0 && data.s <= 4
+        && isValidHist(data.h)
+        && data.pickupDate is string && data.pickupDate.size() <= 20
+        && (data.pickupDate == '' || data.pickupDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$'))
+        && data.delivered is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     // --- Collection Rules ---
     match /customers/{customerId} {
       allow get: if isSignedIn() && isVerified() && isValidId(customerId) && existing().ownerId == request.auth.uid;
@@ -169,10 +236,10 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && (
-          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'frame', 'lens', 'framePrice', 'lensPrice', 'total', 'paid', 'photo', 'r', 'l', 'pickupDate', 'updatedAt'])
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'frame', 'lens', 'framePrice', 'lensPrice', 'total', 'paid', 'photo', 'r', 'l', 'add', 'usageType', 'pickupDate', 'updatedAt'])
           || incoming().diff(existing()).affectedKeys().hasOnly(['status', 'hist', 'updatedAt'])
-          || incoming().diff(existing()).affectedKeys().hasOnly(['status', 'hist', 'delivered', 'updatedAt'])
-          || incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'frame', 'lens', 'framePrice', 'lensPrice', 'total', 'paid', 'photo', 'r', 'l', 'pickupDate', 'status', 'hist', 'delivered', 'updatedAt'])
+          || incoming().diff(existing()).affectedKeys().hasOnly(['status', 'hist', 'delivered', 'paid', 'updatedAt'])
+          || incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'frame', 'lens', 'framePrice', 'lensPrice', 'total', 'paid', 'photo', 'r', 'l', 'add', 'usageType', 'pickupDate', 'status', 'hist', 'delivered', 'updatedAt'])
         );
 
       allow delete: if isSignedIn() && isVerified() && isValidId(customerId) && existing().ownerId == request.auth.uid;
@@ -204,9 +271,9 @@ service cloud.firestore {
         && incoming().updatedAt == request.time
         && (
           incoming().diff(existing()).affectedKeys().hasOnly(['s', 'h', 'updatedAt'])
-          || incoming().diff(existing()).affectedKeys().hasOnly(['s', 'h', 'delivered', 'updatedAt'])
-          || incoming().diff(existing()).affectedKeys().hasOnly(['shopName', 'n', 'frame', 'lens', 'total', 'paid', 'ph', 'r', 'l', 'pickupDate', 'updatedAt'])
-          || incoming().diff(existing()).affectedKeys().hasOnly(['shopName', 'n', 'frame', 'lens', 'total', 'paid', 'ph', 'r', 'l', 'pickupDate', 's', 'h', 'delivered', 'updatedAt'])
+          || incoming().diff(existing()).affectedKeys().hasOnly(['s', 'h', 'delivered', 'paid', 'updatedAt'])
+          || incoming().diff(existing()).affectedKeys().hasOnly(['shopName', 'n', 'frame', 'lens', 'total', 'paid', 'ph', 'r', 'l', 'add', 'usageType', 'pickupDate', 'updatedAt'])
+          || incoming().diff(existing()).affectedKeys().hasOnly(['shopName', 'n', 'frame', 'lens', 'total', 'paid', 'ph', 'r', 'l', 'add', 'usageType', 'pickupDate', 's', 'h', 'delivered', 'updatedAt'])
         );
 
       allow delete: if isSignedIn() && isVerified() && isValidId(trackId) && existing().ownerId == request.auth.uid;
@@ -257,6 +324,69 @@ service cloud.firestore {
         && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'category', 'price', 'notes', 'photo', 'updatedAtMs', 'updatedAt']);
 
       allow delete: if isSignedIn() && isVerified() && isValidId(priceId) && existing().ownerId == request.auth.uid;
+    }
+
+    match /repairs/{repairId} {
+      allow get: if isSignedIn() && isVerified() && isValidId(repairId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && isVerified() && resource.data.ownerId == request.auth.uid;
+
+      allow create: if isSignedIn() && isVerified()
+        && isValidId(repairId)
+        && isValidRepair(incoming(), repairId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isSignedIn() && isVerified()
+        && isValidId(repairId)
+        && existing().ownerId == request.auth.uid
+        && isValidRepair(incoming(), repairId)
+        && incoming().ownerId == existing().ownerId
+        && incoming().id == existing().id
+        && incoming().tok == existing().tok
+        && incoming().date == existing().date
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'glassesType', 'weldingType', 'representativeName', 'cost', 'paid', 'notes', 'pickupDate', 'updatedAt'])
+          || incoming().diff(existing()).affectedKeys().hasOnly(['status', 'hist', 'updatedAt'])
+          || incoming().diff(existing()).affectedKeys().hasOnly(['status', 'hist', 'delivered', 'paid', 'updatedAt'])
+          || incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'glassesType', 'weldingType', 'representativeName', 'cost', 'paid', 'notes', 'pickupDate', 'status', 'hist', 'delivered', 'updatedAt'])
+        );
+
+      allow delete: if isSignedIn() && isVerified() && isValidId(repairId) && existing().ownerId == request.auth.uid;
+    }
+
+    match /repairTrack/{trackId} {
+      allow get: if isValidId(trackId) && trackId.size() >= 8;
+      allow list: if false;
+
+      allow create: if isSignedIn() && isVerified()
+        && isValidId(trackId)
+        && trackId.size() >= 8
+        && isValidRepairTrack(incoming(), trackId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && existsAfter(/databases/$(database)/documents/repairs/$(incoming().repairId))
+        && getAfter(/databases/$(database)/documents/repairs/$(incoming().repairId)).data.ownerId == request.auth.uid;
+
+      allow update: if isSignedIn() && isVerified()
+        && isValidId(trackId)
+        && trackId.size() >= 8
+        && existing().ownerId == request.auth.uid
+        && isValidRepairTrack(incoming(), trackId)
+        && incoming().ownerId == existing().ownerId
+        && incoming().tok == existing().tok
+        && incoming().repairId == existing().repairId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['s', 'h', 'updatedAt'])
+          || incoming().diff(existing()).affectedKeys().hasOnly(['s', 'h', 'delivered', 'paid', 'updatedAt'])
+          || incoming().diff(existing()).affectedKeys().hasOnly(['shopName', 'n', 'glassesType', 'weldingType', 'representativeName', 'cost', 'paid', 'pickupDate', 'updatedAt'])
+          || incoming().diff(existing()).affectedKeys().hasOnly(['shopName', 'n', 'glassesType', 'weldingType', 'representativeName', 'cost', 'paid', 'pickupDate', 's', 'h', 'delivered', 'updatedAt'])
+        );
+
+      allow delete: if isSignedIn() && isVerified() && isValidId(trackId) && existing().ownerId == request.auth.uid;
     }
 
     match /test/connection {

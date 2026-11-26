@@ -18,22 +18,32 @@ import {
   CustomerRecord,
   DEFAULT_WA_TEMPLATE,
   PendingPriceSyncOp,
+  PendingRepairSyncOp,
   PendingSyncOp,
   PriceItem,
   PriceItemCategory,
+  RepairRecord,
   ShopSettings,
   SyncState,
+  UsageType,
 } from '../types/optics';
 import {
   advanceHist,
+  applyCustomerDeliverySettlement,
+  applyRepairDeliverySettlement,
   clampNumber,
   generateCustomerId,
   generatePriceItemId,
+  generateRepairId,
   generateToken,
   normalizeCustomerRecord,
   normalizePriceCategory,
   normalizePriceItem,
+  normalizeRepairRecord,
+  normalizeUsageType,
   SAMPLE_CUSTOMERS,
+  SAMPLE_REPAIRS,
+  sanitizeAddPower,
   sanitizeEyeTuple,
   sanitizeFramePhoto,
   sanitizeId,
@@ -48,6 +58,8 @@ const LEGACY_CUSTOMERS_KEY = 'mido_customers';
 const STORAGE_PENDING_KEY = 'mido_pending_ops_v1';
 const STORAGE_PRICES_KEY = 'mido_prices_v1';
 const STORAGE_PENDING_PRICES_KEY = 'mido_pending_price_ops_v1';
+const STORAGE_REPAIRS_KEY = 'mido_repairs_v1';
+const STORAGE_PENDING_REPAIRS_KEY = 'mido_pending_repair_ops_v1';
 const STORAGE_SETTINGS_KEY = 'mido_settings_v1';
 
 const DEFAULT_SETTINGS: ShopSettings = {
@@ -167,6 +179,48 @@ function writePendingPriceOps(ops: PendingPriceSyncOp[]): void {
   }
 }
 
+function readLocalRepairs(): RepairRecord[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_REPAIRS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map(normalizeRepairRecord)
+      .filter((x): x is RepairRecord => x !== null)
+      .sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalRepairs(list: RepairRecord[]): void {
+  try {
+    localStorage.setItem(STORAGE_REPAIRS_KEY, JSON.stringify(list));
+  } catch {
+    // Ignore storage quota errors gracefully
+  }
+}
+
+function readPendingRepairOps(): PendingRepairSyncOp[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_PENDING_REPAIRS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writePendingRepairOps(ops: PendingRepairSyncOp[]): void {
+  try {
+    localStorage.setItem(STORAGE_PENDING_REPAIRS_KEY, JSON.stringify(ops));
+  } catch {
+    // Ignore storage quota errors gracefully
+  }
+}
+
 export interface CustomerInput {
   id?: string;
   name: string;
@@ -180,6 +234,8 @@ export interface CustomerInput {
   photo: string;
   r: [string, string, string];
   l: [string, string, string];
+  add?: string;
+  usageType?: UsageType;
   pickupDate: string;
 }
 
@@ -192,6 +248,19 @@ export interface PriceItemInput {
   photo?: string;
 }
 
+export interface RepairInput {
+  id?: string;
+  name: string;
+  phone: string;
+  glassesType: string;
+  weldingType: string;
+  representativeName: string;
+  cost: number;
+  paid: number;
+  notes?: string;
+  pickupDate: string;
+}
+
 export function useOpticsStore() {
   const isOnline = useOnlineStatus();
   const [user, setUser] = useState<User | null>(null);
@@ -202,15 +271,20 @@ export function useOpticsStore() {
   const [pendingPriceOps, setPendingPriceOps] = useState<PendingPriceSyncOp[]>(() =>
     readPendingPriceOps()
   );
+  const [repairs, setRepairs] = useState<RepairRecord[]>(() => readLocalRepairs());
+  const [pendingRepairOps, setPendingRepairOps] = useState<PendingRepairSyncOp[]>(() =>
+    readPendingRepairOps()
+  );
   const [settings, setSettings] = useState<ShopSettings>(() => readLocalSettings());
   const [firestorePendingWrites, setFirestorePendingWrites] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
 
   const knownServerCustomerIds = useRef<Set<string>>(new Set());
   const knownServerPriceIds = useRef<Set<string>>(new Set());
+  const knownServerRepairIds = useRef<Set<string>>(new Set());
   const isFlushing = useRef(false);
 
-  // Persist local mirror whenever customers/pendingOps/settings change
+  // Persist local mirror whenever collections/pendingOps/settings change
   useEffect(() => {
     writeLocalCustomers(customers);
   }, [customers]);
@@ -226,6 +300,14 @@ export function useOpticsStore() {
   useEffect(() => {
     writePendingPriceOps(pendingPriceOps);
   }, [pendingPriceOps]);
+
+  useEffect(() => {
+    writeLocalRepairs(repairs);
+  }, [repairs]);
+
+  useEffect(() => {
+    writePendingRepairOps(pendingRepairOps);
+  }, [pendingRepairOps]);
 
   useEffect(() => {
     writeLocalSettings(settings);
@@ -271,6 +353,8 @@ export function useOpticsStore() {
           : '';
       const safeR = sanitizeEyeTuple(record.r);
       const safeL = sanitizeEyeTuple(record.l);
+      const safeAdd = sanitizeAddPower(record.add);
+      const safeUsageType = normalizeUsageType(record.usageType);
       const safeStatus = Math.max(0, Math.min(4, Math.trunc(record.status || 0)));
       const rawHist = Array.isArray(record.hist) ? record.hist.slice(0, 5) : [Date.now()];
       const safeHist = rawHist.map((item, idx) => {
@@ -304,6 +388,8 @@ export function useOpticsStore() {
           photo: safePhoto,
           r: safeR,
           l: safeL,
+          add: safeAdd,
+          usageType: safeUsageType,
           status: safeStatus,
           hist: safeHist,
           pickupDate: safePickupDate,
@@ -326,6 +412,8 @@ export function useOpticsStore() {
           photo: safePhoto,
           r: safeR,
           l: safeL,
+          add: safeAdd,
+          usageType: safeUsageType,
           status: safeStatus,
           hist: safeHist,
           tok,
@@ -355,6 +443,8 @@ export function useOpticsStore() {
           ph: safePhoto,
           r: safeR,
           l: safeL,
+          add: safeAdd,
+          usageType: safeUsageType,
           s: safeStatus,
           h: safeHist,
           pickupDate: safePickupDate,
@@ -375,6 +465,8 @@ export function useOpticsStore() {
           ph: safePhoto,
           r: safeR,
           l: safeL,
+          add: safeAdd,
+          usageType: safeUsageType,
           s: safeStatus,
           h: safeHist,
           pickupDate: safePickupDate,
@@ -479,10 +571,169 @@ export function useOpticsStore() {
     }
   }, []);
 
+  const commitRepairUpsertToFirestore = useCallback(
+    async (record: RepairRecord, uid: string, shopName: string) => {
+      const id = sanitizeId(record.id, 'r');
+      const tok = sanitizeToken(record.tok);
+      const repairRef = doc(db, 'repairs', id);
+      const trackRef = doc(db, 'repairTrack', tok);
+      const batch = writeBatch(db);
+
+      let existsOnServer = knownServerRepairIds.current.has(id);
+      if (!existsOnServer) {
+        try {
+          const existingSnap = await getDoc(repairRef);
+          existsOnServer = existingSnap.exists();
+          if (existsOnServer) {
+            knownServerRepairIds.current.add(id);
+          }
+        } catch {
+          existsOnServer = false;
+        }
+      }
+
+      const safeCost = clampNumber(record.cost);
+      const safePaid = clampNumber(record.paid);
+      const safeStatus = Math.max(0, Math.min(4, Math.trunc(record.status || 0)));
+      const rawHist = Array.isArray(record.hist) ? record.hist.slice(0, 5) : [Date.now()];
+      const safeHist = rawHist.map((item, idx) => {
+        if (typeof item === 'number' && Number.isFinite(item) && item >= 0) {
+          return Math.trunc(item);
+        }
+        return idx === 0 ? Date.now() : null;
+      });
+      if (safeHist.length === 0) {
+        safeHist.push(Date.now());
+      }
+      const rawDate = String(record.date || '').trim().slice(0, 40);
+      const safeDate = rawDate.length >= 10 ? rawDate : new Date().toISOString();
+      const safeName = record.name.trim().slice(0, 120) || 'عميل';
+      const safePhone = (record.phone || '').trim().slice(0, 30);
+      const safeGlasses = (record.glassesType || '').trim().slice(0, 120);
+      const safeWelding = (record.weldingType || '').trim().slice(0, 120);
+      const safeRep = (record.representativeName || '').trim().slice(0, 120);
+      const safeNotes = (record.notes || '').trim().slice(0, 240);
+      const safePickupDate = sanitizePickupDate(record.pickupDate);
+      const safeDelivered = Boolean(record.delivered);
+
+      if (existsOnServer) {
+        batch.update(repairRef, {
+          name: safeName,
+          phone: safePhone,
+          glassesType: safeGlasses,
+          weldingType: safeWelding,
+          representativeName: safeRep,
+          cost: safeCost,
+          paid: safePaid,
+          notes: safeNotes,
+          status: safeStatus,
+          hist: safeHist,
+          pickupDate: safePickupDate,
+          delivered: safeDelivered,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        batch.set(repairRef, {
+          id,
+          ownerId: uid,
+          date: safeDate,
+          name: safeName,
+          phone: safePhone,
+          glassesType: safeGlasses,
+          weldingType: safeWelding,
+          representativeName: safeRep,
+          cost: safeCost,
+          paid: safePaid,
+          notes: safeNotes,
+          status: safeStatus,
+          hist: safeHist,
+          tok,
+          pickupDate: safePickupDate,
+          delivered: safeDelivered,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      let trackExists = existsOnServer;
+      try {
+        const trackSnap = await getDoc(trackRef);
+        trackExists = trackSnap.exists();
+      } catch {
+        trackExists = existsOnServer;
+      }
+
+      if (trackExists) {
+        batch.update(trackRef, {
+          shopName: shopName.slice(0, 80) || 'Mido Optics',
+          n: safeName,
+          glassesType: safeGlasses,
+          weldingType: safeWelding,
+          representativeName: safeRep,
+          cost: safeCost,
+          paid: safePaid,
+          s: safeStatus,
+          h: safeHist,
+          pickupDate: safePickupDate,
+          delivered: safeDelivered,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        batch.set(trackRef, {
+          tok,
+          ownerId: uid,
+          repairId: id,
+          shopName: shopName.slice(0, 80) || 'Mido Optics',
+          n: safeName,
+          glassesType: safeGlasses,
+          weldingType: safeWelding,
+          representativeName: safeRep,
+          cost: safeCost,
+          paid: safePaid,
+          s: safeStatus,
+          h: safeHist,
+          pickupDate: safePickupDate,
+          delivered: safeDelivered,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      try {
+        await batch.commit();
+        knownServerRepairIds.current.add(id);
+      } catch (err) {
+        handleFirestoreError(err, OperationType.WRITE, `repairs/${id}`);
+      }
+    },
+    []
+  );
+
+  const commitRepairDeleteToFirestore = useCallback(async (repairId: string, tok?: string) => {
+    const id = sanitizeId(repairId, 'r');
+    const batch = writeBatch(db);
+    batch.delete(doc(db, 'repairs', id));
+    if (tok) {
+      batch.delete(doc(db, 'repairTrack', sanitizeToken(tok)));
+    }
+    try {
+      await batch.commit();
+      knownServerRepairIds.current.delete(id);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `repairs/${id}`);
+    }
+  }, []);
+
   // Flush queued offline/pre-login ops when authenticated & online
   const flushPendingOps = useCallback(async () => {
     if (!user || !user.emailVerified || !isOnline || isFlushing.current) return;
-    if (pendingOps.length === 0 && pendingPriceOps.length === 0) return;
+    if (
+      pendingOps.length === 0 &&
+      pendingPriceOps.length === 0 &&
+      pendingRepairOps.length === 0
+    ) {
+      return;
+    }
 
     isFlushing.current = true;
     try {
@@ -516,6 +767,21 @@ export function useOpticsStore() {
         setPendingPriceOps((prev) => prev.filter((op) => !succeededPriceOpIds.has(op.id)));
       }
 
+      const repairOpsToRun = [...pendingRepairOps];
+      const succeededRepairOpIds = new Set<string>();
+      for (const op of repairOpsToRun) {
+        if (op.type === 'upsert' && op.record) {
+          await commitRepairUpsertToFirestore(op.record, user.uid, settings.shopName);
+          succeededRepairOpIds.add(op.id);
+        } else if (op.type === 'delete') {
+          await commitRepairDeleteToFirestore(op.repairId, op.tok);
+          succeededRepairOpIds.add(op.id);
+        }
+      }
+      if (succeededRepairOpIds.size > 0) {
+        setPendingRepairOps((prev) => prev.filter((op) => !succeededRepairOpIds.has(op.id)));
+      }
+
       setSyncError(null);
     } catch (err) {
       setSyncError(err instanceof Error ? err.message : 'تعذر المزامنة');
@@ -527,11 +793,14 @@ export function useOpticsStore() {
     isOnline,
     pendingOps,
     pendingPriceOps,
+    pendingRepairOps,
     settings.shopName,
     commitUpsertToFirestore,
     commitDeleteToFirestore,
     commitPriceUpsertToFirestore,
     commitPriceDeleteToFirestore,
+    commitRepairUpsertToFirestore,
+    commitRepairDeleteToFirestore,
   ]);
 
   useEffect(() => {
@@ -543,6 +812,7 @@ export function useOpticsStore() {
     if (!authReady || !user || !user.emailVerified) {
       knownServerCustomerIds.current.clear();
       knownServerPriceIds.current.clear();
+      knownServerRepairIds.current.clear();
       setFirestorePendingWrites(false);
       return;
     }
@@ -733,10 +1003,92 @@ export function useOpticsStore() {
       }
     );
 
+    const repairsQuery = query(collection(db, 'repairs'), where('ownerId', '==', user.uid));
+    let isFirstRepairSnapshot = true;
+
+    const unsubRepairs = onSnapshot(
+      repairsQuery,
+      { includeMetadataChanges: true },
+      (snapshot) => {
+        setSyncError(null);
+        const serverRepairs: RepairRecord[] = [];
+        const nextKnownRepairs = new Set<string>();
+
+        for (const docSnap of snapshot.docs) {
+          const normalized = normalizeRepairRecord(docSnap.data());
+          if (normalized) {
+            serverRepairs.push(normalized);
+            nextKnownRepairs.add(normalized.id);
+          }
+        }
+
+        knownServerRepairIds.current = nextKnownRepairs;
+
+        if (isFirstRepairSnapshot && serverRepairs.length === 0) {
+          const localOnlyRepairs = readLocalRepairs();
+          if (localOnlyRepairs.length > 0) {
+            isFirstRepairSnapshot = false;
+            setPendingRepairOps((prev) => {
+              const existingRepairIds = new Set(prev.map((p) => p.repairId));
+              const additions: PendingRepairSyncOp[] = localOnlyRepairs
+                .filter((r) => !existingRepairIds.has(r.id))
+                .map((r) => ({
+                  id: `migrate_rep_${r.id}_${Date.now()}`,
+                  type: 'upsert',
+                  repairId: r.id,
+                  record: { ...r, ownerId: user.uid },
+                  tok: r.tok,
+                  queuedAt: Date.now(),
+                }));
+              return additions.length ? [...prev, ...additions] : prev;
+            });
+            return;
+          }
+        }
+        isFirstRepairSnapshot = false;
+
+        const currentPendingRepairs = readPendingRepairOps();
+        const pendingDeletes = new Set(
+          currentPendingRepairs.filter((op) => op.type === 'delete').map((op) => op.repairId)
+        );
+        const pendingUpserts = new Map<string, RepairRecord>();
+        for (const op of currentPendingRepairs) {
+          if (op.type === 'upsert' && op.record) {
+            pendingUpserts.set(op.repairId, op.record);
+          }
+        }
+
+        const mergedRepairs = new Map<string, RepairRecord>();
+        for (const item of serverRepairs) {
+          if (!pendingDeletes.has(item.id)) {
+            mergedRepairs.set(item.id, item);
+          }
+        }
+        for (const [id, rec] of pendingUpserts.entries()) {
+          mergedRepairs.set(id, rec);
+        }
+
+        setRepairs(
+          Array.from(mergedRepairs.values()).sort(
+            (a, b) => Date.parse(b.date) - Date.parse(a.date)
+          )
+        );
+      },
+      (err) => {
+        setSyncError(err.message);
+        try {
+          handleFirestoreError(err, OperationType.LIST, 'repairs');
+        } catch {
+          // Structured error logged in handleFirestoreError; keep app running offline-first
+        }
+      }
+    );
+
     return () => {
       unsubCustomers();
       unsubSettings();
       unsubPrices();
+      unsubRepairs();
     };
   }, [authReady, user]);
 
@@ -790,6 +1142,8 @@ export function useOpticsStore() {
             photo: input.photo || '',
             r: sanitizeEyeTuple(input.r),
             l: sanitizeEyeTuple(input.l),
+            add: sanitizeAddPower(input.add),
+            usageType: normalizeUsageType(input.usageType),
             pickupDate: sanitizePickupDate(input.pickupDate),
           }
         : {
@@ -807,6 +1161,8 @@ export function useOpticsStore() {
             photo: input.photo || '',
             r: sanitizeEyeTuple(input.r),
             l: sanitizeEyeTuple(input.l),
+            add: sanitizeAddPower(input.add),
+            usageType: normalizeUsageType(input.usageType),
             status: 0,
             hist: [Date.now()],
             tok: generateToken(10),
@@ -848,12 +1204,7 @@ export function useOpticsStore() {
     (customerId: string): CustomerRecord | null => {
       const target = customers.find((c) => c.id === customerId);
       if (!target) return null;
-      const updated: CustomerRecord = {
-        ...target,
-        status: 4,
-        hist: target.status >= 4 ? target.hist : advanceHist(target.hist, 4, Date.now()),
-        delivered: true,
-      };
+      const updated = applyCustomerDeliverySettlement(target, Date.now());
       setCustomers((prev) => prev.map((c) => (c.id === customerId ? updated : c)));
       queueOrSyncUpsert(updated);
       return updated;
@@ -1095,15 +1446,194 @@ export function useOpticsStore() {
     return additions.length;
   }, [priceItems, user, queueOrSyncPriceUpsert]);
 
+  const queueOrSyncRepairUpsert = useCallback(
+    (record: RepairRecord) => {
+      if (user && user.emailVerified) {
+        if (isOnline) {
+          void commitRepairUpsertToFirestore(record, user.uid, settings.shopName).catch((err) => {
+            setSyncError(err instanceof Error ? err.message : 'تعذر المزامنة');
+          });
+        } else {
+          void commitRepairUpsertToFirestore(record, user.uid, settings.shopName).catch(() => {});
+        }
+        return;
+      }
+
+      setPendingRepairOps((prev) => [
+        ...prev.filter((op) => op.repairId !== record.id),
+        {
+          id: `rep_op_${record.id}_${Date.now()}`,
+          type: 'upsert',
+          repairId: record.id,
+          record,
+          tok: record.tok,
+          queuedAt: Date.now(),
+        },
+      ]);
+    },
+    [user, isOnline, settings.shopName, commitRepairUpsertToFirestore]
+  );
+
+  const saveRepair = useCallback(
+    (input: RepairInput): { record: RepairRecord; isNew: boolean } => {
+      const existing = input.id ? repairs.find((r) => r.id === input.id) : undefined;
+      const isNew = !existing;
+      const nowIso = new Date().toISOString();
+
+      const record: RepairRecord = existing
+        ? {
+            ...existing,
+            name: input.name.trim().slice(0, 120),
+            phone: input.phone.trim().slice(0, 30),
+            glassesType: input.glassesType.trim().slice(0, 120),
+            weldingType: input.weldingType.trim().slice(0, 120),
+            representativeName: input.representativeName.trim().slice(0, 120),
+            cost: clampNumber(input.cost),
+            paid: clampNumber(input.paid),
+            notes: (input.notes || '').trim().slice(0, 240),
+            pickupDate: sanitizePickupDate(input.pickupDate),
+          }
+        : {
+            id: generateRepairId(),
+            ownerId: user?.uid,
+            date: nowIso,
+            name: input.name.trim().slice(0, 120),
+            phone: input.phone.trim().slice(0, 30),
+            glassesType: input.glassesType.trim().slice(0, 120),
+            weldingType: input.weldingType.trim().slice(0, 120),
+            representativeName: input.representativeName.trim().slice(0, 120),
+            cost: clampNumber(input.cost),
+            paid: clampNumber(input.paid),
+            notes: (input.notes || '').trim().slice(0, 240),
+            status: 0,
+            hist: [Date.now()],
+            tok: generateToken(10),
+            pickupDate: sanitizePickupDate(input.pickupDate),
+            delivered: false,
+          };
+
+      setRepairs((prev) => {
+        if (existing) {
+          return prev.map((item) => (item.id === record.id ? record : item));
+        }
+        return [record, ...prev];
+      });
+
+      queueOrSyncRepairUpsert(record);
+      return { record, isNew };
+    },
+    [repairs, user, queueOrSyncRepairUpsert]
+  );
+
+  const updateRepairStage = useCallback(
+    (repairId: string, nextStage: number): RepairRecord | null => {
+      const target = repairs.find((r) => r.id === repairId);
+      if (!target) return null;
+      const clampedStage = Math.max(0, Math.min(4, Math.trunc(nextStage)));
+      const updated: RepairRecord = {
+        ...target,
+        status: clampedStage,
+        hist: advanceHist(target.hist, clampedStage, Date.now()),
+      };
+      setRepairs((prev) => prev.map((r) => (r.id === repairId ? updated : r)));
+      queueOrSyncRepairUpsert(updated);
+      return updated;
+    },
+    [repairs, queueOrSyncRepairUpsert]
+  );
+
+  const markRepairDelivered = useCallback(
+    (repairId: string): RepairRecord | null => {
+      const target = repairs.find((r) => r.id === repairId);
+      if (!target) return null;
+      const updated = applyRepairDeliverySettlement(target, Date.now());
+      setRepairs((prev) => prev.map((r) => (r.id === repairId ? updated : r)));
+      queueOrSyncRepairUpsert(updated);
+      return updated;
+    },
+    [repairs, queueOrSyncRepairUpsert]
+  );
+
+  const restoreRepairOrder = useCallback(
+    (repairId: string): RepairRecord | null => {
+      const target = repairs.find((r) => r.id === repairId);
+      if (!target) return null;
+      const updated: RepairRecord = {
+        ...target,
+        delivered: false,
+      };
+      setRepairs((prev) => prev.map((r) => (r.id === repairId ? updated : r)));
+      queueOrSyncRepairUpsert(updated);
+      return updated;
+    },
+    [repairs, queueOrSyncRepairUpsert]
+  );
+
+  const deleteRepair = useCallback(
+    (repairId: string) => {
+      const target = repairs.find((r) => r.id === repairId);
+      setRepairs((prev) => prev.filter((r) => r.id !== repairId));
+
+      if (user && user.emailVerified) {
+        void commitRepairDeleteToFirestore(repairId, target?.tok).catch((err) => {
+          setSyncError(err instanceof Error ? err.message : 'تعذر الحذف من السحابة');
+        });
+      } else {
+        setPendingRepairOps((prev) => [
+          ...prev.filter((op) => op.repairId !== repairId),
+          {
+            id: `del_rep_${repairId}_${Date.now()}`,
+            type: 'delete',
+            repairId,
+            tok: target?.tok,
+            queuedAt: Date.now(),
+          },
+        ]);
+      }
+    },
+    [repairs, user, commitRepairDeleteToFirestore]
+  );
+
+  const importRepairs = useCallback(
+    (rawArray: unknown[]): number => {
+      const normalized = rawArray
+        .map(normalizeRepairRecord)
+        .filter((x): x is RepairRecord => x !== null);
+      if (normalized.length === 0) return 0;
+
+      setRepairs((prev) => {
+        const map = new Map<string, RepairRecord>();
+        for (const r of prev) map.set(r.id, r);
+        for (const r of normalized) map.set(r.id, r);
+        return Array.from(map.values()).sort(
+          (a, b) => Date.parse(b.date) - Date.parse(a.date)
+        );
+      });
+
+      for (const rec of normalized) {
+        queueOrSyncRepairUpsert(rec);
+      }
+      return normalized.length;
+    },
+    [queueOrSyncRepairUpsert]
+  );
+
+  const loadSampleRepairs = useCallback(() => {
+    return importRepairs(SAMPLE_REPAIRS);
+  }, [importRepairs]);
+
+  const totalPendingCount =
+    pendingOps.length + pendingPriceOps.length + pendingRepairOps.length;
+
   const syncState: SyncState = useMemo(() => {
     if (syncError) return 'error';
     if (!isOnline) return 'offline';
     if (!user) return 'local-only';
-    if (firestorePendingWrites || pendingOps.length > 0 || pendingPriceOps.length > 0) {
+    if (firestorePendingWrites || totalPendingCount > 0) {
       return 'syncing';
     }
     return 'synced';
-  }, [syncError, isOnline, user, firestorePendingWrites, pendingOps.length, pendingPriceOps.length]);
+  }, [syncError, isOnline, user, firestorePendingWrites, totalPendingCount]);
 
   return {
     user,
@@ -1111,10 +1641,11 @@ export function useOpticsStore() {
     isOnline,
     syncState,
     syncError,
-    pendingCount: pendingOps.length + pendingPriceOps.length,
+    pendingCount: totalPendingCount,
     firestorePendingWrites,
     customers,
     priceItems,
+    repairs,
     settings,
     saveCustomer,
     updateOrderStage,
@@ -1126,6 +1657,13 @@ export function useOpticsStore() {
     savePriceItem,
     deletePriceItem,
     loadStarterPriceItems,
+    saveRepair,
+    updateRepairStage,
+    markRepairDelivered,
+    restoreRepairOrder,
+    deleteRepair,
+    importRepairs,
+    loadSampleRepairs,
     updateSettings,
     flushPendingOps,
   };

@@ -2,6 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   advanceHist,
+  applyCustomerDeliverySettlement,
+  applyRepairDeliverySettlement,
+  buildRepairStageWhatsAppDispatch,
+  buildRepairTrackingUrl,
   buildSinglePagePdfFromJpeg,
   buildSmsUrl,
   buildStageWhatsAppDispatch,
@@ -11,10 +15,12 @@ import {
   calculateMonthlyCustomerGrowth,
   calculateOrderReadinessStats,
   calculateRemaining,
+  calculateRepairStats,
   checkEyeLensAvailability,
   collectPickupReminders,
   filterArchivedOrders,
   filterPriceItems,
+  filterRepairs,
   formatEgyptianWhatsAppPhone,
   formatFirebaseAuthError,
   getPickupUrgency,
@@ -23,14 +29,16 @@ import {
   normalizeLensPowerValue,
   normalizePriceCategory,
   normalizePriceItem,
+  normalizeRepairRecord,
   parseLensInventoryBackupJson,
   renderReadyPickupMessage,
   renderWhatsAppMessage,
+  SAMPLE_REPAIRS,
   sanitizeFramePhoto,
   sanitizePickupDate,
   STARTER_PRICE_ITEMS,
 } from './optics';
-import type { CustomerRecord, PriceItem } from '../types/optics';
+import type { CustomerRecord, PriceItem, RepairRecord } from '../types/optics';
 
 test('calculateRemaining computes total minus paid accurately', () => {
   assert.equal(calculateRemaining(1200, 500), 700);
@@ -569,6 +577,124 @@ test('sanitizeFramePhoto and normalizePriceItem preserve valid compressed frame 
   });
   assert.ok(lensIgnoringPhoto);
   assert.equal(lensIgnoringPhoto.photo, '');
+});
+
+test('normalizeCustomerRecord preserves add power and distance/reading usageType', () => {
+  const rec = normalizeCustomerRecord({
+    id: 'cust_add_1',
+    name: 'ماجد سمير',
+    total: 1200,
+    paid: 500,
+    r: ['-1.00', '-', '-'],
+    l: ['-1.25', '-0.50', '90'],
+    add: '+2.00',
+    usageType: 'reading',
+  });
+  assert.ok(rec);
+  assert.equal(rec.add, '+2.00');
+  assert.equal(rec.usageType, 'reading');
+
+  const fallback = normalizeCustomerRecord({
+    id: 'cust_add_2',
+    name: 'عميل آخر',
+    usageType: 'invalid-mode',
+  });
+  assert.ok(fallback);
+  assert.equal(fallback.usageType, '');
+  assert.equal(fallback.add, '');
+});
+
+test('applyCustomerDeliverySettlement settles remaining balance to خالص and updates stats revenue', () => {
+  const unsettled: CustomerRecord = {
+    id: 'c_settle',
+    date: '2026-11-26T10:00:00Z',
+    name: 'سالم فتحي',
+    phone: '01012345678',
+    frame: 'TR90',
+    lens: 'Blue Cut',
+    total: 1400,
+    paid: 500,
+    photo: '',
+    r: ['-1.00', '-', '-'],
+    l: ['-1.00', '-', '-'],
+    status: 2,
+    hist: [1000, 2000, 3000],
+    tok: 'settle1234',
+    pickupDate: '2026-11-27',
+    delivered: false,
+  };
+
+  const beforeStats = calculateOrderReadinessStats([unsettled]);
+  assert.equal(beforeStats.totalCollected, 500);
+  assert.equal(beforeStats.totalRemaining, 900);
+
+  const settled = applyCustomerDeliverySettlement(unsettled, 9000);
+  assert.equal(settled.delivered, true);
+  assert.equal(settled.status, 4);
+  assert.equal(settled.paid, 1400);
+  assert.equal(calculateRemaining(settled.total, settled.paid), 0);
+
+  const afterStats = calculateOrderReadinessStats([settled]);
+  assert.equal(afterStats.totalCollected, 1400);
+  assert.equal(afterStats.totalRemaining, 0);
+});
+
+test('repair normalization, search, WhatsApp ready dispatch, delivery settlement, and stats work together', () => {
+  const rec = normalizeRepairRecord({
+    id: 'rep 99',
+    name: 'كامل حسن',
+    phone: '01199887766',
+    glassesType: 'شمبر معدن',
+    weldingType: 'لحام ليزر',
+    representativeName: 'أحمد المندوب',
+    cost: 300,
+    paid: 100,
+    status: 4,
+  });
+  assert.ok(rec);
+  assert.equal(rec.id, 'rep_99');
+  assert.equal(calculateRemaining(rec.cost, rec.paid), 200);
+
+  const trackUrl = buildRepairTrackingUrl('https://mido-optics.web.app', '/', rec.tok);
+  assert.equal(trackUrl, `https://mido-optics.web.app/#rtrack-${rec.tok}`);
+
+  const dispatch = buildRepairStageWhatsAppDispatch({
+    repair: rec,
+    trackingUrl: trackUrl,
+    shopName: 'Mido Optics',
+  });
+  assert.equal(dispatch.isReadyNotification, true);
+  assert.match(dispatch.message, /كامل حسن/);
+  assert.match(dispatch.message, /لحام ليزر/);
+  assert.match(dispatch.message, /200/);
+
+  const filteredByWelding = filterRepairs([rec, ...SAMPLE_REPAIRS], 'ليزر');
+  assert.ok(filteredByWelding.some((r) => r.id === rec.id));
+  const filteredByRep = filterRepairs([rec], 'أحمد المندوب');
+  assert.equal(filteredByRep.length, 1);
+
+  const settled = applyRepairDeliverySettlement(rec, 12345);
+  assert.equal(settled.delivered, true);
+  assert.equal(settled.paid, 300);
+  assert.equal(calculateRemaining(settled.cost, settled.paid), 0);
+
+  const stats = calculateRepairStats([settled] as RepairRecord[]);
+  assert.equal(stats.totalRepairs, 1);
+  assert.equal(stats.deliveredCount, 1);
+  assert.equal(stats.totalCollected, 300);
+  assert.equal(stats.totalRemaining, 0);
+});
+
+test('buildSinglePagePdfFromJpeg supports 80mm thermal cashier roll format', () => {
+  const fakeJpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0xff, 0xd9]);
+  const pdf = buildSinglePagePdfFromJpeg({
+    jpegBytes: fakeJpeg,
+    imageWidth: 576,
+    imageHeight: 1120,
+    paperFormat: 'thermal-80mm',
+  });
+  const text = new TextDecoder('latin1').decode(pdf);
+  assert.ok(text.includes('/MediaBox [0 0 226.77'));
 });
 
 

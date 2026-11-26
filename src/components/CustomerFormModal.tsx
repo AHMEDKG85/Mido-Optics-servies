@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Calendar, Check, Glasses, Phone, Tag, User, X } from 'lucide-react';
-import { CustomerRecord, LensInventorySnapshot, PriceItem } from '../types/optics';
+import { CustomerRecord, LensInventorySnapshot, PriceItem, UsageType } from '../types/optics';
 import { CustomerInput } from '../hooks/useOpticsStore';
 import { compressFramePhotoFile } from '../utils/image';
 import {
@@ -46,7 +46,8 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
   const [ls, setLs] = useState('');
   const [lc, setLc] = useState('');
   const [la, setLa] = useState('');
-  const [pickupDate, setPickupDate] = useState('');
+  const [addPower, setAddPower] = useState('');
+  const [usageType, setUsageType] = useState<UsageType>('');
   const [clockText, setClockText] = useState('');
   const [photoFromPriceList, setPhotoFromPriceList] = useState(false);
 
@@ -77,7 +78,8 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
       setLs(editingCustomer.l[0] === '-' ? '' : editingCustomer.l[0]);
       setLc(editingCustomer.l[1] === '-' ? '' : editingCustomer.l[1]);
       setLa(editingCustomer.l[2] === '-' ? '' : editingCustomer.l[2]);
-      setPickupDate(editingCustomer.pickupDate || '');
+      setAddPower(editingCustomer.add || '');
+      setUsageType(editingCustomer.usageType || '');
       setClockText(formatArabicDateTime(editingCustomer.date));
       return;
     }
@@ -97,7 +99,8 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
     setLs('');
     setLc('');
     setLa('');
-    setPickupDate('');
+    setAddPower('');
+    setUsageType('');
 
     const updateClock = () =>
       setClockText(
@@ -252,7 +255,9 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
       photo,
       r: [rs.trim() || '-', rc.trim() || '-', ra.trim() || '-'],
       l: [ls.trim() || '-', lc.trim() || '-', la.trim() || '-'],
-      pickupDate: pickupDate.trim(),
+      add: addPower.trim(),
+      usageType,
+      pickupDate: editingCustomer?.pickupDate || '',
     });
   };
 
@@ -478,77 +483,62 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
               </div>
             )}
 
-            <div>
-              <label
-                htmlFor="cust-total"
-                className="text-xs font-semibold text-slate-600 dark:text-slate-300 block mb-1"
-              >
-                المبلغ الكلي (جنيه)
-              </label>
-              <input
-                id="cust-total"
-                type="number"
-                min="0"
-                step="any"
-                value={total}
-                onChange={(e) => setTotal(e.target.value)}
-                className="w-full min-h-[42px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0d1722] text-sm font-bold tabular-nums focus:outline-none focus:border-[#c9a24b]"
-              />
-              {(framePrice.trim() !== '' || lensPrice.trim() !== '') && (
-                <p className="text-[11px] text-[#8f6c1e] dark:text-[#e8cf8b] mt-1 tabular-nums">
-                  يحسب تلقائياً: سعر الشمبر + سعر العدسات
-                </p>
-              )}
-            </div>
+            <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+              <div>
+                <label
+                  htmlFor="cust-total"
+                  className="text-xs font-semibold text-slate-600 dark:text-slate-300 block mb-1"
+                >
+                  المبلغ الكلي (جنيه)
+                </label>
+                <input
+                  id="cust-total"
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={total}
+                  onChange={(e) => setTotal(e.target.value)}
+                  className="w-full min-h-[42px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0d1722] text-sm font-bold tabular-nums focus:outline-none focus:border-[#c9a24b]"
+                />
+                {(framePrice.trim() !== '' || lensPrice.trim() !== '') && (
+                  <p className="text-[11px] text-[#8f6c1e] dark:text-[#e8cf8b] mt-1 tabular-nums">
+                    يحسب تلقائياً: سعر الشمبر + سعر العدسات
+                  </p>
+                )}
+              </div>
 
-            <div>
-              <label
-                htmlFor="cust-paid"
-                className="text-xs font-semibold text-slate-600 dark:text-slate-300 block mb-1"
-              >
-                المبلغ المدفوع (جنيه)
-              </label>
-              <input
-                id="cust-paid"
-                type="number"
-                min="0"
-                step="any"
-                value={paid}
-                onChange={(e) => setPaid(e.target.value)}
-                className="w-full min-h-[42px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0d1722] text-sm tabular-nums focus:outline-none focus:border-[#c9a24b]"
-              />
-            </div>
+              <div>
+                <label
+                  htmlFor="cust-paid"
+                  className="text-xs font-semibold text-slate-600 dark:text-slate-300 block mb-1"
+                >
+                  المبلغ المدفوع (جنيه)
+                </label>
+                <input
+                  id="cust-paid"
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={paid}
+                  onChange={(e) => setPaid(e.target.value)}
+                  className="w-full min-h-[42px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0d1722] text-sm tabular-nums focus:outline-none focus:border-[#c9a24b]"
+                />
+              </div>
 
-            <div>
-              <label
-                htmlFor="cust-rest"
-                className="text-xs font-semibold text-slate-600 dark:text-slate-300 block mb-1"
-              >
-                الباقي
-              </label>
-              <input
-                id="cust-rest"
-                readOnly
-                value={rest}
-                className="w-full min-h-[42px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-[#e3f2fb] dark:bg-[#1b3042] text-sm font-bold tabular-nums"
-              />
-            </div>
-
-            <div>
-              <label
-                htmlFor="cust-pickup-date"
-                className="text-xs font-semibold text-slate-600 dark:text-slate-300 flex items-center gap-1.5 mb-1"
-              >
-                <Calendar className="w-3.5 h-3.5 text-[#c9a24b]" />
-                <span>تاريخ استلام النظارة</span>
-              </label>
-              <input
-                id="cust-pickup-date"
-                type="date"
-                value={pickupDate}
-                onChange={(e) => setPickupDate(e.target.value)}
-                className="w-full min-h-[42px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0d1722] text-sm tabular-nums focus:outline-none focus:border-[#c9a24b]"
-              />
+              <div>
+                <label
+                  htmlFor="cust-rest"
+                  className="text-xs font-semibold text-slate-600 dark:text-slate-300 block mb-1"
+                >
+                  الباقي
+                </label>
+                <input
+                  id="cust-rest"
+                  readOnly
+                  value={rest}
+                  className="w-full min-h-[42px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-[#e3f2fb] dark:bg-[#1b3042] text-sm font-bold tabular-nums"
+                />
+              </div>
             </div>
 
             <div className="sm:col-span-2">
@@ -590,6 +580,45 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
                   </button>
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* Usage Type: Distance vs Reading */}
+          <div className="rounded-2xl bg-[#f3f9fd] dark:bg-[#1b3042]/65 border border-slate-200 dark:border-slate-700 p-3.5">
+            <span className="text-xs font-bold text-[#8f6c1e] dark:text-[#e8cf8b] block mb-2">
+              نوع النظارة / الاستخدام
+            </span>
+            <div
+              role="group"
+              aria-label="نوع الاستخدام مسافات أو قراءة"
+              className="grid grid-cols-2 gap-2"
+            >
+              {(
+                [
+                  { id: 'distance', label: 'مسافات' },
+                  { id: 'reading', label: 'قراءة' },
+                ] as const
+              ).map((option) => {
+                const active = usageType === option.id;
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() =>
+                      setUsageType((prev) => (prev === option.id ? '' : option.id))
+                    }
+                    className={`min-h-[42px] px-4 rounded-xl border text-sm font-bold inline-flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                      active
+                        ? 'bg-gradient-to-br from-[#d9b65c] to-[#a8832f] border-[#a8832f] text-white shadow-sm'
+                        : 'bg-white dark:bg-[#0d1722] border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-[#c9a24b]'
+                    }`}
+                  >
+                    {active && <Check className="w-4 h-4 shrink-0" />}
+                    <span>{option.label}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -662,6 +691,27 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
                 </div>
               ))}
             </div>
+
+            {/* Small ADD field directly under Left Eye */}
+            <div className="mt-2.5 flex items-center justify-end gap-2.5" dir="ltr">
+              <div className="w-28 sm:w-32">
+                <label
+                  htmlFor="l-add"
+                  className="block text-center text-[11px] font-bold text-[#8f6c1e] dark:text-[#e8cf8b] mb-1"
+                >
+                  ADD
+                </label>
+                <input
+                  id="l-add"
+                  maxLength={16}
+                  placeholder="+0.00"
+                  value={addPower}
+                  onChange={(e) => setAddPower(e.target.value)}
+                  className="w-full min-h-[38px] px-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0d1722] text-center font-mono-num text-xs focus:outline-none focus:border-[#c9a24b]"
+                />
+              </div>
+            </div>
+
             <div className="mt-2.5">
               <EyeLensStatusBadge
                 eye="L"
@@ -674,7 +724,7 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
           <div className="flex items-center gap-3 pt-2">
             <button
               type="submit"
-              className="flex-1 min-h-[46px] px-5 rounded-xl bg-gradient-to-br from-[#d9b65c] to-[#a8832f] text-white text-sm font-bold inline-flex items-center justify-center gap-2 cursor-pointer"
+              className="flex-1 min-h-[46px] px-5 rounded-xl bg-gradient-to-br from-[#d9b65c] to-[#a8832f] hover:from-[#e3c26e] hover:to-[#977427] text-white text-sm font-bold inline-flex items-center justify-center gap-2 shadow-sm transition-all active:scale-[0.99] cursor-pointer"
             >
               <Check className="w-4 h-4" />
               <span>{editingCustomer ? 'حفظ التعديلات' : 'حفظ العميل'}</span>
@@ -682,7 +732,7 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="min-h-[46px] px-5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#192b3b] text-slate-700 dark:text-slate-200 text-sm font-semibold cursor-pointer"
+              className="min-h-[46px] px-5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#192b3b] hover:border-slate-300 dark:hover:border-slate-600 text-slate-700 dark:text-slate-200 text-sm font-semibold transition-colors cursor-pointer"
             >
               إلغاء
             </button>

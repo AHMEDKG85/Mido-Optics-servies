@@ -11,7 +11,7 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react';
-import { CustomerRecord, ORDER_STAGES } from '../types/optics';
+import { CustomerRecord, ORDER_STAGES, USAGE_TYPE_LABELS } from '../types/optics';
 import {
   calculateRemaining,
   formatArabicDateTime,
@@ -126,7 +126,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
           <button
             type="button"
             onClick={handleExport}
-            className="min-h-[44px] px-3.5 py-2 rounded-xl bg-white dark:bg-[#15232f] border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-[#c9a24b] text-sm font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+            className="min-h-[44px] px-3.5 py-2 rounded-xl bg-white dark:bg-[#15232f] border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-[#c9a24b] text-sm font-medium inline-flex items-center gap-1.5 shadow-xs transition-all active:scale-[0.98] cursor-pointer whitespace-nowrap"
           >
             <Download className="w-4 h-4 text-[#c9a24b]" />
             <span>حفظ نسخة</span>
@@ -135,7 +135,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="min-h-[44px] px-3.5 py-2 rounded-xl bg-white dark:bg-[#15232f] border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-[#c9a24b] text-sm font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+            className="min-h-[44px] px-3.5 py-2 rounded-xl bg-white dark:bg-[#15232f] border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-[#c9a24b] text-sm font-medium inline-flex items-center gap-1.5 shadow-xs transition-all active:scale-[0.98] cursor-pointer whitespace-nowrap"
           >
             <Upload className="w-4 h-4 text-[#c9a24b]" />
             <span>استرجاع</span>
@@ -235,8 +235,15 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
                       >
                         {c.phone || '—'}
                       </td>
-                      <td className="px-2.5 py-3 text-slate-700 dark:text-slate-300 max-w-[170px] truncate">
-                        {[c.frame, c.lens].filter(Boolean).join(' · ') || '—'}
+                      <td className="px-2.5 py-3 text-slate-700 dark:text-slate-300 max-w-[190px]">
+                        <div className="truncate">
+                          {[c.frame, c.lens].filter(Boolean).join(' · ') || '—'}
+                        </div>
+                        {c.usageType && (
+                          <div className="text-[11px] font-semibold text-[#8f6c1e] dark:text-[#e8cf8b] mt-0.5">
+                            {USAGE_TYPE_LABELS[c.usageType]}
+                          </div>
+                        )}
                       </td>
                       <td className="px-2.5 py-3 tabular-nums font-medium whitespace-nowrap">
                         {c.total}
@@ -265,6 +272,11 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
                           <span className="text-[#a8832f] dark:text-[#e8cf8b] font-bold">L: </span>
                           {c.l.join(' / ')}
                         </div>
+                        {c.add && (
+                          <div className="text-[10px] font-bold text-slate-600 dark:text-slate-300">
+                            ADD: {c.add}
+                          </div>
+                        )}
                       </td>
                       <td className="px-2.5 py-3 text-xs font-medium whitespace-nowrap">
                         <div className="space-y-1">
@@ -298,13 +310,13 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
                         </div>
                       </td>
                       <td className="px-2.5 py-3 whitespace-nowrap">
-                        <div className="flex items-center justify-end gap-1">
+                        <div className="flex items-center justify-end gap-1.5">
                           <button
                             type="button"
                             onClick={() => onOpenInvoice(c)}
                             aria-label={`فاتورة ${c.name}`}
                             title="فاتورة للطباعة / PDF"
-                            className="min-h-[36px] min-w-[36px] px-2 rounded-lg bg-[#f3f9fd] dark:bg-[#1b3042] text-[#8f6c1e] dark:text-[#e8cf8b] hover:bg-[#e3f2fb] dark:hover:bg-[#254057] inline-flex items-center justify-center cursor-pointer"
+                            className="min-h-[36px] min-w-[36px] px-2 rounded-xl border border-slate-200/80 dark:border-slate-700 bg-[#f3f9fd] dark:bg-[#1b3042] text-[#8f6c1e] dark:text-[#e8cf8b] hover:border-[#c9a24b] inline-flex items-center justify-center shadow-xs transition-all active:scale-[0.96] cursor-pointer"
                           >
                             <Printer className="w-4 h-4" />
                           </button>
@@ -313,7 +325,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
                             onClick={() => onOpenOrder(c)}
                             aria-label={`متابعة وواتساب ${c.name}`}
                             title="متابعة الطلب وواتساب"
-                            className="min-h-[36px] min-w-[36px] px-2 rounded-lg bg-[#e3f2fb] dark:bg-[#1b3042] text-[#8f6c1e] dark:text-[#e8cf8b] hover:bg-[#cde7f7] dark:hover:bg-[#254057] inline-flex items-center justify-center cursor-pointer"
+                            className="min-h-[36px] min-w-[36px] px-2 rounded-xl border border-sky-200/80 dark:border-slate-700 bg-[#e3f2fb] dark:bg-[#1b3042] text-[#8f6c1e] dark:text-[#e8cf8b] hover:border-[#c9a24b] inline-flex items-center justify-center shadow-xs transition-all active:scale-[0.96] cursor-pointer"
                           >
                             <Send className="w-4 h-4" />
                           </button>
@@ -322,7 +334,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
                             onClick={() => onEditCustomer(c)}
                             aria-label={`تعديل ${c.name}`}
                             title="تعديل بيانات العميل"
-                            className="min-h-[36px] min-w-[36px] px-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 inline-flex items-center justify-center cursor-pointer"
+                            className="min-h-[36px] min-w-[36px] px-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:border-[#c9a24b] inline-flex items-center justify-center shadow-xs transition-all active:scale-[0.96] cursor-pointer"
                           >
                             <Edit3 className="w-4 h-4" />
                           </button>
@@ -330,10 +342,10 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
                             type="button"
                             onClick={() => handleDeleteClick(c.id)}
                             aria-label={isArmed ? `تأكيد حذف ${c.name}` : `حذف ${c.name}`}
-                            className={`min-h-[36px] min-w-[36px] px-2 rounded-lg text-xs font-semibold inline-flex items-center justify-center cursor-pointer transition-colors ${
+                            className={`min-h-[36px] min-w-[36px] px-2 rounded-xl text-xs font-semibold inline-flex items-center justify-center shadow-xs transition-all active:scale-[0.96] cursor-pointer ${
                               isArmed
                                 ? 'bg-rose-600 text-white'
-                                : 'bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-400 hover:bg-rose-600 hover:text-white'
+                                : 'border border-rose-200 dark:border-rose-900/60 bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-400 hover:bg-rose-600 hover:text-white'
                             }`}
                           >
                             {isArmed ? 'تأكيد الحذف؟' : <Trash2 className="w-4 h-4" />}
@@ -388,6 +400,14 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
                     <span>الشمبر: {c.frame || '—'}</span>
                     <span>·</span>
                     <span>العدسات: {c.lens || '—'}</span>
+                    {c.usageType && (
+                      <>
+                        <span>·</span>
+                        <span className="font-bold text-[#8f6c1e] dark:text-[#e8cf8b]">
+                          {USAGE_TYPE_LABELS[c.usageType]}
+                        </span>
+                      </>
+                    )}
                     {c.pickupDate && (
                       <>
                         <span>·</span>
@@ -459,8 +479,15 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
                       {c.r.join(' / ')}
                     </div>
                     <div className="rounded-lg border border-slate-200 dark:border-slate-700 py-1.5 px-2">
-                      <span className="text-[#a8832f] dark:text-[#e8cf8b] font-bold">L: </span>
-                      {c.l.join(' / ')}
+                      <div>
+                        <span className="text-[#a8832f] dark:text-[#e8cf8b] font-bold">L: </span>
+                        {c.l.join(' / ')}
+                      </div>
+                      {c.add && (
+                        <div className="text-[11px] font-bold text-[#8f6c1e] dark:text-[#e8cf8b] mt-0.5">
+                          ADD: {c.add}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -469,7 +496,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
                       type="button"
                       onClick={() => onOpenInvoice(c)}
                       aria-label={`فاتورة ${c.name}`}
-                      className="min-h-[44px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#192b3b] text-[#8f6c1e] dark:text-[#e8cf8b] font-semibold text-xs inline-flex items-center justify-center gap-1 cursor-pointer"
+                      className="min-h-[44px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#192b3b] text-[#8f6c1e] dark:text-[#e8cf8b] font-semibold text-xs inline-flex items-center justify-center gap-1 shadow-xs transition-all active:scale-[0.98] cursor-pointer"
                     >
                       <Printer className="w-4 h-4" />
                       <span>فاتورة</span>
@@ -477,7 +504,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
                     <button
                       type="button"
                       onClick={() => onOpenOrder(c)}
-                      className="flex-1 min-h-[44px] px-3 rounded-xl bg-[#e3f2fb] dark:bg-[#1b3042] text-[#8f6c1e] dark:text-[#e8cf8b] font-semibold text-xs inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                      className="flex-1 min-h-[44px] px-3 rounded-xl bg-[#e3f2fb] dark:bg-[#1b3042] text-[#8f6c1e] dark:text-[#e8cf8b] font-semibold text-xs inline-flex items-center justify-center gap-1.5 shadow-xs transition-all active:scale-[0.98] cursor-pointer"
                     >
                       <Eye className="w-4 h-4" />
                       <span>متابعة وواتساب</span>
@@ -486,7 +513,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
                       type="button"
                       onClick={() => onEditCustomer(c)}
                       aria-label={`تعديل ${c.name}`}
-                      className="min-h-[44px] min-w-[44px] px-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold text-xs inline-flex items-center justify-center gap-1 cursor-pointer"
+                      className="min-h-[44px] min-w-[44px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold text-xs inline-flex items-center justify-center gap-1 shadow-xs transition-all active:scale-[0.98] cursor-pointer"
                     >
                       <Edit3 className="w-4 h-4" />
                       <span>تعديل</span>
@@ -495,10 +522,10 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
                       type="button"
                       onClick={() => handleDeleteClick(c.id)}
                       aria-label={isArmed ? `تأكيد حذف ${c.name}` : `حذف ${c.name}`}
-                      className={`min-h-[44px] min-w-[44px] px-3 rounded-xl text-xs font-semibold inline-flex items-center justify-center cursor-pointer ${
+                      className={`min-h-[44px] min-w-[44px] px-3 rounded-xl text-xs font-semibold inline-flex items-center justify-center shadow-xs transition-all active:scale-[0.98] cursor-pointer ${
                         isArmed
                           ? 'bg-rose-600 text-white'
-                          : 'bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-400'
+                          : 'border border-rose-200 dark:border-rose-900/60 bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-400'
                       }`}
                     >
                       {isArmed ? 'تأكيد؟' : <Trash2 className="w-4 h-4" />}

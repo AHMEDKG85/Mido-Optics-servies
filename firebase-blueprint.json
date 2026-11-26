@@ -75,6 +75,16 @@
           "type": "array",
           "description": "Left eye prescription tuple [SPH, CYL, AXIS]."
         },
+        "add": {
+          "type": "string",
+          "maxLength": 16,
+          "description": "Optional near addition (ADD) power under the left eye."
+        },
+        "usageType": {
+          "type": "string",
+          "enum": ["distance", "reading", ""],
+          "description": "Eyeglass usage mode: distance or reading."
+        },
         "status": {
           "type": "integer",
           "description": "Current order progress stage from 0 to 4."
@@ -200,6 +210,16 @@
         "l": {
           "type": "array",
           "description": "Left eye prescription [SPH, CYL, AXIS]."
+        },
+        "add": {
+          "type": "string",
+          "maxLength": 16,
+          "description": "Optional near addition (ADD) power."
+        },
+        "usageType": {
+          "type": "string",
+          "enum": ["distance", "reading", ""],
+          "description": "Eyeglass usage mode: distance or reading."
         },
         "s": {
           "type": "integer",
@@ -378,6 +398,234 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "Repair": {
+      "title": "Repair",
+      "description": "Optical shop glasses repair/welding ticket with representative tracking, payment state, and repair stages.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "description": "Unique identifier for the repair ticket."
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "description": "Firebase Auth UID of the shop owner."
+        },
+        "date": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 40,
+          "description": "ISO 8601 creation date string."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Customer full name."
+        },
+        "phone": {
+          "type": "string",
+          "maxLength": 30,
+          "description": "Customer WhatsApp phone number."
+        },
+        "glassesType": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Glasses frame type or description."
+        },
+        "weldingType": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Welding or repair work type."
+        },
+        "representativeName": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Representative or technician name handling the repair."
+        },
+        "cost": {
+          "type": "number",
+          "description": "Total repair cost in EGP."
+        },
+        "paid": {
+          "type": "number",
+          "description": "Amount paid so far in EGP."
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 240,
+          "description": "Optional repair notes."
+        },
+        "status": {
+          "type": "integer",
+          "description": "Current repair stage from 0 to 4."
+        },
+        "hist": {
+          "type": "array",
+          "description": "Timestamps in ms for each reached repair stage (up to 5 entries)."
+        },
+        "tok": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 32,
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "description": "Unguessable public repair tracking token."
+        },
+        "pickupDate": {
+          "type": "string",
+          "maxLength": 20,
+          "description": "Optional scheduled pickup date (YYYY-MM-DD)."
+        },
+        "delivered": {
+          "type": "boolean",
+          "description": "Whether the repaired glasses have been picked up."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last update timestamp."
+        }
+      },
+      "required": [
+        "id",
+        "ownerId",
+        "date",
+        "name",
+        "phone",
+        "glassesType",
+        "weldingType",
+        "representativeName",
+        "cost",
+        "paid",
+        "notes",
+        "status",
+        "hist",
+        "tok",
+        "pickupDate",
+        "delivered",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "RepairTrack": {
+      "title": "RepairTrack",
+      "description": "Publicly addressable non-PII glasses repair status document keyed by unguessable token.",
+      "type": "object",
+      "properties": {
+        "tok": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 32,
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "description": "Tracking token matching document ID."
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "description": "Firebase Auth UID of the shop owner."
+        },
+        "repairId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "description": "Reference to parent Repair document ID."
+        },
+        "shopName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Optical shop display name."
+        },
+        "n": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Customer display name without phone or email PII."
+        },
+        "glassesType": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Glasses type."
+        },
+        "weldingType": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Welding / repair type."
+        },
+        "representativeName": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Representative name."
+        },
+        "cost": {
+          "type": "number",
+          "description": "Total repair cost in EGP."
+        },
+        "paid": {
+          "type": "number",
+          "description": "Amount paid so far in EGP."
+        },
+        "s": {
+          "type": "integer",
+          "description": "Repair stage from 0 to 4."
+        },
+        "h": {
+          "type": "array",
+          "description": "Stage completion timestamps."
+        },
+        "pickupDate": {
+          "type": "string",
+          "maxLength": 20,
+          "description": "Scheduled pickup date (YYYY-MM-DD) or empty string."
+        },
+        "delivered": {
+          "type": "boolean",
+          "description": "Whether the repaired glasses have been picked up."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last update timestamp."
+        }
+      },
+      "required": [
+        "tok",
+        "ownerId",
+        "repairId",
+        "shopName",
+        "n",
+        "glassesType",
+        "weldingType",
+        "representativeName",
+        "cost",
+        "paid",
+        "s",
+        "h",
+        "pickupDate",
+        "delivered",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -404,6 +652,18 @@
         "$ref": "#/entities/PriceItem"
       },
       "description": "Private optical shop product and service price catalog, isolated per authenticated shop owner."
+    },
+    "/repairs/{repairId}": {
+      "schema": {
+        "$ref": "#/entities/Repair"
+      },
+      "description": "Private optical shop repair tickets and welding records, isolated per authenticated shop owner."
+    },
+    "/repairTrack/{trackId}": {
+      "schema": {
+        "$ref": "#/entities/RepairTrack"
+      },
+      "description": "Non-PII public tracking view for a specific repair token, readable only via direct get by token."
     }
   }
 }

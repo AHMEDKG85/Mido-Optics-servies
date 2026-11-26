@@ -6,10 +6,19 @@ import {
   MessageCircle,
   Printer,
   Share2,
+  Wrench,
   X,
 } from 'lucide-react';
-import { CustomerRecord, ORDER_STAGES, ShopSettings } from '../types/optics';
 import {
+  CustomerRecord,
+  ORDER_STAGES,
+  REPAIR_STAGES,
+  RepairRecord,
+  ShopSettings,
+  USAGE_TYPE_LABELS,
+} from '../types/optics';
+import {
+  buildRepairTrackingUrl,
   buildSinglePagePdfFromJpeg,
   buildTrackingUrl,
   calculateRemaining,
@@ -19,226 +28,222 @@ import {
 } from '../utils/optics';
 
 interface InvoiceModalProps {
-  customer: CustomerRecord | null;
+  customer?: CustomerRecord | null;
+  repair?: RepairRecord | null;
   settings: ShopSettings;
   onClose: () => void;
   onToast: (msg: string) => void;
 }
 
-async function renderInvoiceCanvas(params: {
-  customer: CustomerRecord;
+async function renderThermalReceiptCanvas(params: {
+  customer?: CustomerRecord | null;
+  repair?: RepairRecord | null;
   shopName: string;
-  trackingUrl: string;
   qrCanvas: HTMLCanvasElement | null;
 }): Promise<HTMLCanvasElement> {
-  const { customer, shopName, qrCanvas } = params;
-  const width = 1240;
-  const height = 1754;
+  const { customer, repair, shopName, qrCanvas } = params;
+  const width = 576; // 80mm thermal roll width (~203dpi)
+  const height = customer ? 1060 : 940;
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
   canvas.dir = 'rtl';
   const ctx = canvas.getContext('2d');
   if (!ctx) {
-    throw new Error('تعذر إنشاء الفاتورة');
+    throw new Error('تعذر إنشاء الإيصال');
   }
 
-  // White paper background
+  // Crisp thermal white background
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, width, height);
 
-  // Subtle outer frame
-  ctx.strokeStyle = '#d6c18a';
-  ctx.lineWidth = 4;
-  ctx.strokeRect(48, 48, width - 96, height - 96);
+  const pad = 26;
+  const innerW = width - pad * 2;
+  let y = 36;
 
-  // Top gold header band
-  const grad = ctx.createLinearGradient(48, 48, width - 48, 220);
-  grad.addColorStop(0, '#c9a24b');
-  grad.addColorStop(1, '#9d7929');
-  ctx.fillStyle = grad;
-  ctx.fillRect(48, 48, width - 96, 175);
+  const drawDashedLine = (lineY: number) => {
+    ctx.save();
+    ctx.strokeStyle = '#64748b';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([7, 6]);
+    ctx.beginPath();
+    ctx.moveTo(pad, lineY);
+    ctx.lineTo(width - pad, lineY);
+    ctx.stroke();
+    ctx.restore();
+  };
 
-  // Header text (RTL)
+  // Shop header
   ctx.direction = 'rtl';
-  ctx.fillStyle = '#ffffff';
-  ctx.textAlign = 'right';
-  ctx.font = 'bold 46px "Cairo", "Segoe UI", Tahoma, sans-serif';
-  ctx.fillText(shopName || 'Mido Optics', width - 92, 128);
-
-  ctx.font = '600 26px "Cairo", "Segoe UI", Tahoma, sans-serif';
-  ctx.fillStyle = '#fef7e4';
-  ctx.fillText('فاتورة طلب نظارة طبية', width - 92, 178);
-
-  const invoiceCode = `#${customer.id.slice(-8).toUpperCase()}`;
-  ctx.direction = 'ltr';
-  ctx.textAlign = 'left';
-  ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 30px monospace';
-  ctx.fillText(invoiceCode, 92, 130);
-  ctx.direction = 'rtl';
-  ctx.font = '500 22px "Cairo", "Segoe UI", Tahoma, sans-serif';
-  ctx.fillText(formatArabicDateTime(customer.date) || '', 92, 175);
-
-  // Customer & Order details section
-  let y = 290;
-  ctx.direction = 'rtl';
-  ctx.textAlign = 'right';
+  ctx.textAlign = 'center';
   ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 30px "Cairo", "Segoe UI", Tahoma, sans-serif';
-  ctx.fillText('بيانات العميل والطلب', width - 92, y);
+  ctx.font = 'bold 34px "Cairo", "Segoe UI", Tahoma, sans-serif';
+  ctx.fillText(shopName || 'Mido Optics', width / 2, y);
 
-  y += 28;
-  ctx.fillStyle = '#f8fafc';
-  ctx.strokeStyle = '#e2e8f0';
-  ctx.lineWidth = 2;
-  ctx.fillRect(88, y, width - 176, 250);
-  ctx.strokeRect(88, y, width - 176, 250);
+  y += 32;
+  ctx.fillStyle = '#334155';
+  ctx.font = 'bold 20px "Cairo", "Segoe UI", Tahoma, sans-serif';
+  ctx.fillText(repair ? 'إيصال استلام تصليح نظارة' : 'إيصال طلب نظارة طبية', width / 2, y);
 
-  const stageText = customer.delivered
-    ? 'تم تسليم النظارة'
-    : ORDER_STAGES[Math.max(0, Math.min(4, customer.status || 0))];
+  y += 26;
+  const code = repair
+    ? `REP-${repair.id.slice(-8).toUpperCase()}`
+    : `INV-${(customer?.id || '').slice(-8).toUpperCase()}`;
+  const dateText = formatArabicDateTime(repair ? repair.date : customer?.date) || '';
+  ctx.fillStyle = '#475569';
+  ctx.font = 'bold 17px monospace';
+  ctx.fillText(`${code}  |  ${dateText}`, width / 2, y);
 
-  const detailRows: Array<[string, string]> = [
-    ['اسم العميل:', customer.name],
-    ['رقم الهاتف:', customer.phone || 'غير مسجل'],
-    ['نوع الشمبر:', customer.frame || '—'],
-    ['نوع العدسات:', customer.lens || '—'],
-    [
-      'موعد الاستلام:',
-      customer.pickupDate ? formatArabicPickupDate(customer.pickupDate) : 'غير محدد',
-    ],
-    ['حالة الطلب:', stageText],
-  ];
+  y += 22;
+  drawDashedLine(y);
 
-  let rowY = y + 48;
-  for (const [label, val] of detailRows) {
+  const drawKeyValueRow = (label: string, value: string, bold = false) => {
+    y += 30;
     ctx.direction = 'rtl';
     ctx.textAlign = 'right';
-    ctx.fillStyle = '#64748b';
-    ctx.font = '600 24px "Cairo", "Segoe UI", Tahoma, sans-serif';
-    ctx.fillText(label, width - 120, rowY);
+    ctx.fillStyle = '#475569';
+    ctx.font = '600 18px "Cairo", "Segoe UI", Tahoma, sans-serif';
+    ctx.fillText(label, width - pad, y);
 
+    ctx.textAlign = 'left';
     ctx.fillStyle = '#0f172a';
-    ctx.font = 'bold 25px "Cairo", "Segoe UI", Tahoma, sans-serif';
-    ctx.fillText(val, width - 310, rowY);
-    rowY += 38;
-  }
+    ctx.font = `${bold ? 'bold' : '600'} 18px "Cairo", "Segoe UI", Tahoma, sans-serif`;
+    ctx.fillText(value.slice(0, 32), pad, y);
+  };
 
-  // Prescription table
-  y += 305;
-  ctx.direction = 'rtl';
-  ctx.textAlign = 'right';
-  ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 30px "Cairo", "Segoe UI", Tahoma, sans-serif';
-  ctx.fillText('مقاس النظر (R / L)', width - 92, y);
+  if (repair) {
+    const stageText = repair.delivered
+      ? 'تم التسليم للعميل'
+      : REPAIR_STAGES[Math.max(0, Math.min(4, repair.status || 0))];
+    drawKeyValueRow('اسم العميل:', repair.name, true);
+    drawKeyValueRow('واتساب:', repair.phone || 'غير مسجل');
+    drawKeyValueRow('نوع النظارة:', repair.glassesType || '—');
+    drawKeyValueRow('نوع اللحام:', repair.weldingType || '—');
+    drawKeyValueRow('اسم المندوب:', repair.representativeName || '—');
+    drawKeyValueRow('حالة التصليح:', stageText);
+    if (repair.notes) {
+      drawKeyValueRow('ملاحظات:', repair.notes);
+    }
 
-  y += 26;
-  const tableX = 88;
-  const tableW = width - 176;
-  const colW = tableW / 4;
-  const rowH = 66;
+    y += 22;
+    drawDashedLine(y);
 
-  // Header row
-  ctx.fillStyle = '#e3f2fb';
-  ctx.fillRect(tableX, y, tableW, rowH);
-  ctx.strokeStyle = '#cbd5e1';
-  ctx.strokeRect(tableX, y, tableW, rowH * 3);
+    const rest = calculateRemaining(repair.cost, repair.paid);
+    drawKeyValueRow('تكلفة التصليح:', `${repair.cost} ج`, true);
+    drawKeyValueRow('المدفوع:', `${repair.paid} ج`);
+    drawKeyValueRow('الباقي:', rest > 0 ? `${rest} ج` : 'خالص (0 ج)', true);
+  } else if (customer) {
+    const stageText = customer.delivered
+      ? 'تم التسليم للعميل'
+      : ORDER_STAGES[Math.max(0, Math.min(4, customer.status || 0))];
+    const usageLabel = customer.usageType ? USAGE_TYPE_LABELS[customer.usageType] : '';
 
-  ctx.direction = 'ltr';
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#8f6c1e';
-  ctx.font = 'bold 26px monospace';
-  const headers = ['العين', 'SPH', 'CYL', 'AXIS'];
-  headers.forEach((h, i) => {
-    ctx.fillText(h, tableX + colW * i + colW / 2, y + 43);
-  });
+    drawKeyValueRow('اسم العميل:', customer.name, true);
+    drawKeyValueRow('الهاتف:', customer.phone || 'غير مسجل');
+    if (usageLabel) {
+      drawKeyValueRow('نوع الاستخدام:', usageLabel, true);
+    }
+    drawKeyValueRow('الشمبر:', customer.frame || '—');
+    drawKeyValueRow('العدسات:', customer.lens || '—');
+    if (customer.pickupDate) {
+      drawKeyValueRow('موعد الاستلام:', formatArabicPickupDate(customer.pickupDate));
+    }
+    drawKeyValueRow('الحالة:', stageText);
 
-  const eyeRows: Array<[string, string[]]> = [
-    ['R (يمين)', customer.r],
-    ['L (شمال)', customer.l],
-  ];
+    y += 22;
+    drawDashedLine(y);
 
-  eyeRows.forEach(([eyeLabel, vals], idx) => {
-    const ry = y + rowH * (idx + 1);
-    ctx.beginPath();
-    ctx.moveTo(tableX, ry);
-    ctx.lineTo(tableX + tableW, ry);
-    ctx.stroke();
-
-    ctx.direction = 'rtl';
-    ctx.fillStyle = '#0f172a';
-    ctx.font = 'bold 24px "Cairo", monospace';
-    ctx.fillText(eyeLabel, tableX + colW / 2, ry + 43);
-
-    ctx.direction = 'ltr';
-    vals.forEach((v, cIdx) => {
-      ctx.font = '600 26px monospace';
-      ctx.fillText(v || '-', tableX + colW * (cIdx + 1) + colW / 2, ry + 43);
-    });
-  });
-
-  // Financial Summary Box
-  y += rowH * 3 + 60;
-  ctx.direction = 'rtl';
-  ctx.textAlign = 'right';
-  ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 30px "Cairo", "Segoe UI", Tahoma, sans-serif';
-  ctx.fillText('الملخص المالي', width - 92, y);
-
-  y += 26;
-  const rest = calculateRemaining(customer.total, customer.paid);
-  const boxW = (tableW - 36) / 3;
-  const boxes = [
-    { label: 'المبلغ الكلي', value: `${customer.total} ج`, bg: '#f8fafc', fg: '#0f172a' },
-    { label: 'المبلغ المدفوع', value: `${customer.paid} ج`, bg: '#ecfdf5', fg: '#047857' },
-    {
-      label: 'المبلغ المتبقي',
-      value: rest > 0 ? `${rest} ج` : 'خالص (0 ج)',
-      bg: rest > 0 ? '#fff1f2' : '#ecfdf5',
-      fg: rest > 0 ? '#be123c' : '#047857',
-    },
-  ];
-
-  boxes.forEach((b, idx) => {
-    // RTL order: Total on right, Paid center, Remaining on left
-    const bx = tableX + tableW - boxW - idx * (boxW + 18);
-    ctx.fillStyle = b.bg;
-    ctx.strokeStyle = '#cbd5e1';
-    ctx.fillRect(bx, y, boxW, 130);
-    ctx.strokeRect(bx, y, boxW, 130);
-
+    // Eye table
+    y += 28;
     ctx.direction = 'rtl';
     ctx.textAlign = 'center';
-    ctx.fillStyle = '#475569';
-    ctx.font = '600 24px "Cairo", "Segoe UI", Tahoma, sans-serif';
-    ctx.fillText(b.label, bx + boxW / 2, y + 48);
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 18px "Cairo", "Segoe UI", Tahoma, sans-serif';
+    ctx.fillText('مقاس النظر (R / L)', width / 2, y);
 
-    ctx.fillStyle = b.fg;
-    ctx.font = 'bold 34px "Cairo", "Segoe UI", Tahoma, sans-serif';
-    ctx.fillText(b.value, bx + boxW / 2, y + 100);
-  });
+    y += 14;
+    const colW = innerW / 4;
+    const rowH = 38;
+    ctx.strokeStyle = '#334155';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(pad, y, innerW, rowH * 3);
 
-  // QR Code & footer
-  y += 190;
-  if (qrCanvas) {
-    ctx.drawImage(qrCanvas, 100, y, 200, 200);
+    ctx.fillStyle = '#f1f5f9';
+    ctx.fillRect(pad + 1, y + 1, innerW - 2, rowH - 1);
+
+    ctx.direction = 'ltr';
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 16px monospace';
+    ['EYE', 'SPH', 'CYL', 'AXIS'].forEach((h, i) => {
+      ctx.fillText(h, pad + colW * i + colW / 2, y + 25);
+    });
+
+    [
+      ['R', customer.r],
+      ['L', customer.l],
+    ].forEach(([lbl, vals], rIdx) => {
+      const ry = y + rowH * (rIdx + 1);
+      ctx.beginPath();
+      ctx.moveTo(pad, ry);
+      ctx.lineTo(pad + innerW, ry);
+      ctx.stroke();
+
+      ctx.font = 'bold 17px monospace';
+      ctx.fillText(String(lbl), pad + colW / 2, ry + 25);
+      (vals as string[]).forEach((v, cIdx) => {
+        ctx.font = '600 17px monospace';
+        ctx.fillText(v || '-', pad + colW * (cIdx + 1) + colW / 2, ry + 25);
+      });
+    });
+
+    y += rowH * 3;
+    if (customer.add) {
+      y += 28;
+      ctx.direction = 'ltr';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 17px monospace';
+      ctx.fillText(`ADD (L): ${customer.add}`, width / 2, y);
+    }
+
+    y += 22;
+    drawDashedLine(y);
+
+    const rest = calculateRemaining(customer.total, customer.paid);
+    drawKeyValueRow('المبلغ الكلي:', `${customer.total} ج`, true);
+    drawKeyValueRow('المدفوع:', `${customer.paid} ج`);
+    drawKeyValueRow('الباقي:', rest > 0 ? `${rest} ج` : 'خالص (0 ج)', true);
   }
+
+  y += 24;
+  drawDashedLine(y);
+
+  // QR + Footer
+  y += 20;
+  if (qrCanvas) {
+    const qrSize = 136;
+    ctx.drawImage(qrCanvas, (width - qrSize) / 2, y, qrSize, qrSize);
+    y += qrSize + 24;
+  } else {
+    y += 28;
+  }
+
   ctx.direction = 'rtl';
-  ctx.textAlign = 'right';
+  ctx.textAlign = 'center';
   ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 26px "Cairo", "Segoe UI", Tahoma, sans-serif';
-  ctx.fillText('امسح الكود لمتابعة حالة النظارة خطوة بخطوة', width - 100, y + 60);
-  ctx.fillStyle = '#64748b';
-  ctx.font = '500 22px "Cairo", "Segoe UI", Tahoma, sans-serif';
-  ctx.fillText(`شكراً لتعاملكم مع ${shopName || 'Mido Optics'}`, width - 100, y + 110);
-  ctx.fillText('الأسعار تشمل الضمان وفق سياسة المحل', width - 100, y + 150);
+  ctx.font = 'bold 18px "Cairo", "Segoe UI", Tahoma, sans-serif';
+  ctx.fillText('امسح الكود لمتابعة الحالة خطوة بخطوة', width / 2, y);
+  y += 26;
+  ctx.fillStyle = '#475569';
+  ctx.font = '500 16px "Cairo", "Segoe UI", Tahoma, sans-serif';
+  ctx.fillText(`شكراً لتعاملكم مع ${shopName || 'Mido Optics'}`, width / 2, y);
 
   return canvas;
 }
 
 export const InvoiceModal: React.FC<InvoiceModalProps> = ({
   customer,
+  repair,
   settings,
   onClose,
   onToast,
@@ -246,43 +251,55 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
   const qrCanvasRef = useRef<HTMLCanvasElement>(null);
   const [busyPdf, setBusyPdf] = useState(false);
 
+  const activeRecord = repair || customer || null;
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
   const pathname = typeof window !== 'undefined' ? window.location.pathname : '/';
-  const trackingUrl = customer
+  const trackingUrl = repair
+    ? buildRepairTrackingUrl(origin, pathname, repair.tok, settings.publicBaseUrl)
+    : customer
     ? buildTrackingUrl(origin, pathname, customer.tok, settings.publicBaseUrl)
     : '';
 
   useEffect(() => {
-    if (!customer || !qrCanvasRef.current) return;
+    if (!activeRecord || !qrCanvasRef.current) return;
     void QRCode.toCanvas(qrCanvasRef.current, trackingUrl, {
-      width: 140,
+      width: 112,
       margin: 1,
       color: { dark: '#0f172a', light: '#ffffff' },
     });
-  }, [customer, trackingUrl]);
+  }, [activeRecord, trackingUrl]);
 
   useEffect(() => {
-    if (!customer) return;
+    if (!activeRecord) return;
     document.body.classList.add('printing-invoice');
     return () => {
       document.body.classList.remove('printing-invoice');
     };
-  }, [customer]);
+  }, [activeRecord]);
 
-  if (!customer) return null;
+  if (!activeRecord) return null;
 
-  const rest = calculateRemaining(customer.total, customer.paid);
   const shopName = settings.shopName || 'Mido Optics';
-  const invoiceNumber = `INV-${customer.id.slice(-8).toUpperCase()}`;
-  const stageLabel = customer.delivered
+  const totalAmount = repair ? repair.cost : customer ? customer.total : 0;
+  const paidAmount = repair ? repair.paid : customer ? customer.paid : 0;
+  const rest = calculateRemaining(totalAmount, paidAmount);
+  const invoiceNumber = repair
+    ? `REP-${repair.id.slice(-8).toUpperCase()}`
+    : `INV-${(customer?.id || '').slice(-8).toUpperCase()}`;
+
+  const stageLabel = repair
+    ? repair.delivered
+      ? 'تم التسليم للعميل'
+      : REPAIR_STAGES[Math.max(0, Math.min(4, repair.status || 0))]
+    : customer?.delivered
     ? 'تم التسليم للعميل'
-    : ORDER_STAGES[Math.max(0, Math.min(4, customer.status || 0))];
+    : ORDER_STAGES[Math.max(0, Math.min(4, customer?.status || 0))];
 
   const createPdfFile = async (): Promise<File> => {
-    const canvas = await renderInvoiceCanvas({
+    const canvas = await renderThermalReceiptCanvas({
       customer,
+      repair,
       shopName,
-      trackingUrl,
       qrCanvas: qrCanvasRef.current,
     });
     const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
@@ -296,10 +313,12 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
       jpegBytes,
       imageWidth: canvas.width,
       imageHeight: canvas.height,
+      paperFormat: 'thermal-80mm',
     });
-    const safeName = (customer.name || 'customer').replace(/[^\w\u0600-\u06FF-]+/g, '_');
+    const safeName = (activeRecord.name || 'customer').replace(/[^\w\u0600-\u06FF-]+/g, '_');
+    const prefix = repair ? 'repair-receipt' : 'receipt';
     const blob = new Blob([pdfBytes.buffer as ArrayBuffer], { type: 'application/pdf' });
-    return new File([blob], `invoice-${safeName}-${customer.id.slice(-5)}.pdf`, {
+    return new File([blob], `${prefix}-${safeName}-${activeRecord.id.slice(-5)}.pdf`, {
       type: 'application/pdf',
     });
   };
@@ -318,7 +337,7 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
       a.download = pdfFile.name;
       a.click();
       URL.revokeObjectURL(url);
-      onToast('تم تنزيل الفاتورة بصيغة PDF');
+      onToast('تم تنزيل إيصال الكاشير بصيغة PDF');
     } catch {
       onToast('تعذر توليد ملف PDF، يمكنك استخدام زر الطباعة');
     } finally {
@@ -330,13 +349,24 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
     setBusyPdf(true);
     try {
       const pdfFile = await createPdfFile();
-      const textSummary = [
-        `فاتورة ${shopName} (${invoiceNumber})`,
-        `العميل: ${customer.name}`,
-        `الطلب: ${[customer.frame, customer.lens].filter(Boolean).join(' · ') || 'نظارة طبية'}`,
-        `الإجمالي: ${customer.total} ج | المدفوع: ${customer.paid} ج | المتبقي: ${rest > 0 ? `${rest} ج` : 'خالص'}`,
-        `رابط المتابعة: ${trackingUrl}`,
-      ].join('\n');
+      const textSummary = repair
+        ? [
+            `إيصال تصليح ${shopName} (${invoiceNumber})`,
+            `العميل: ${repair.name}`,
+            `النظارة: ${repair.glassesType || '—'} · اللحام: ${repair.weldingType || '—'}`,
+            repair.representativeName ? `المندوب: ${repair.representativeName}` : '',
+            `التكلفة: ${repair.cost} ج | المدفوع: ${repair.paid} ج | المتبقي: ${rest > 0 ? `${rest} ج` : 'خالص'}`,
+            `رابط المتابعة: ${trackingUrl}`,
+          ]
+            .filter(Boolean)
+            .join('\n')
+        : [
+            `فاتورة ${shopName} (${invoiceNumber})`,
+            `العميل: ${customer?.name}`,
+            `الطلب: ${[customer?.frame, customer?.lens].filter(Boolean).join(' · ') || 'نظارة طبية'}`,
+            `الإجمالي: ${totalAmount} ج | المدفوع: ${paidAmount} ج | المتبقي: ${rest > 0 ? `${rest} ج` : 'خالص'}`,
+            `رابط المتابعة: ${trackingUrl}`,
+          ].join('\n');
 
       if (
         typeof navigator !== 'undefined' &&
@@ -348,23 +378,22 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
 
         if (canShareFiles) {
           await navigator.share({
-            title: `فاتورة ${customer.name} — ${shopName}`,
+            title: `إيصال ${activeRecord.name} — ${shopName}`,
             text: textSummary,
             files: [pdfFile],
           });
-          onToast('تمت مشاركة الفاتورة PDF');
+          onToast('تمت مشاركة الإيصال PDF');
           return;
         }
 
         await navigator.share({
-          title: `فاتورة ${customer.name} — ${shopName}`,
+          title: `إيصال ${activeRecord.name} — ${shopName}`,
           text: textSummary,
         });
-        onToast('تمت مشاركة تفاصيل الفاتورة');
+        onToast('تمت مشاركة تفاصيل الإيصال');
         return;
       }
 
-      // Desktop fallback: download PDF + copy summary
       const url = URL.createObjectURL(pdfFile);
       const a = document.createElement('a');
       a.href = url;
@@ -376,7 +405,7 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
       } catch {
         // ignore clipboard denial
       }
-      onToast('تم تنزيل الفاتورة PDF ونسخ ملخصها للمشاركة');
+      onToast('تم تنزيل الإيصال PDF ونسخ ملخصه للمشاركة');
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') return;
       onToast('تعذر المشاركة التلقائية، استخدم زر تنزيل PDF');
@@ -386,21 +415,38 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
   };
 
   const waInvoiceText = encodeURIComponent(
-    [
-      `فاتورة من ${shopName} (${invoiceNumber})`,
-      `العميل: ${customer.name}`,
-      customer.frame ? `الشمبر: ${customer.frame}` : '',
-      customer.lens ? `العدسات: ${customer.lens}` : '',
-      `المبلغ الكلي: ${customer.total} جنيه`,
-      `المدفوع: ${customer.paid} جنيه`,
-      `المبلغ المتبقي: ${rest > 0 ? `${rest} جنيه` : 'خالص'}`,
-      customer.pickupDate ? `موعد الاستلام: ${formatArabicPickupDate(customer.pickupDate)}` : '',
-      `متابعة الطلب: ${trackingUrl}`,
-    ]
-      .filter(Boolean)
-      .join('\n')
+    repair
+      ? [
+          `إيصال تصليح من ${shopName} (${invoiceNumber})`,
+          `العميل: ${repair.name}`,
+          repair.glassesType ? `نوع النظارة: ${repair.glassesType}` : '',
+          repair.weldingType ? `نوع اللحام: ${repair.weldingType}` : '',
+          repair.representativeName ? `اسم المندوب: ${repair.representativeName}` : '',
+          `تكلفة التصليح: ${repair.cost} جنيه`,
+          `المدفوع: ${repair.paid} جنيه`,
+          `الباقي: ${rest > 0 ? `${rest} جنيه` : 'خالص'}`,
+          `متابعة التصليح: ${trackingUrl}`,
+        ]
+          .filter(Boolean)
+          .join('\n')
+      : [
+          `فاتورة من ${shopName} (${invoiceNumber})`,
+          `العميل: ${customer?.name}`,
+          customer?.usageType ? `الاستخدام: ${USAGE_TYPE_LABELS[customer.usageType]}` : '',
+          customer?.frame ? `الشمبر: ${customer.frame}` : '',
+          customer?.lens ? `العدسات: ${customer.lens}` : '',
+          `المبلغ الكلي: ${totalAmount} جنيه`,
+          `المدفوع: ${paidAmount} جنيه`,
+          `المبلغ المتبقي: ${rest > 0 ? `${rest} جنيه` : 'خالص'}`,
+          customer?.pickupDate
+            ? `موعد الاستلام: ${formatArabicPickupDate(customer.pickupDate)}`
+            : '',
+          `متابعة الطلب: ${trackingUrl}`,
+        ]
+          .filter(Boolean)
+          .join('\n')
   );
-  const waPhone = formatEgyptianWhatsAppPhone(customer.phone);
+  const waPhone = formatEgyptianWhatsAppPhone(activeRecord.phone);
   const waInvoiceUrl = waPhone
     ? `https://wa.me/${waPhone}?text=${waInvoiceText}`
     : `https://wa.me/?text=${waInvoiceText}`;
@@ -414,28 +460,28 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
       onClick={onClose}
     >
       <div
-        className="invoice-print-dialog w-full max-w-2xl max-h-[94vh] overflow-y-auto rounded-3xl bg-white dark:bg-[#15232f] border border-slate-200 dark:border-slate-800 shadow-2xl"
+        className="invoice-print-dialog w-full max-w-xl max-h-[94vh] overflow-y-auto rounded-3xl bg-white dark:bg-[#15232f] border border-slate-200 dark:border-slate-800 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Action Bar (hidden when printing) */}
         <div className="print:hidden sticky top-0 z-10 bg-white/95 dark:bg-[#15232f]/95 backdrop-blur border-b border-slate-200 dark:border-slate-800 px-4 sm:px-5 py-3 flex flex-wrap items-center justify-between gap-2">
           <h2 id="invoice-modal-title" className="text-sm sm:text-base font-extrabold">
-            فاتورة العميل القابلة للطباعة / PDF
+            {repair ? 'فاتورة التصليح — ورق كاشير (80mm)' : 'فاتورة العميل — ورق كاشير (80mm)'}
           </h2>
           <div className="flex flex-wrap items-center gap-1.5">
             <button
               type="button"
               onClick={handlePrint}
-              className="min-h-[38px] px-3 py-1.5 rounded-xl bg-gradient-to-br from-[#d9b65c] to-[#a8832f] text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+              className="min-h-[38px] px-3 py-1.5 rounded-xl bg-gradient-to-br from-[#d9b65c] to-[#a8832f] hover:from-[#e3c26e] hover:to-[#977427] text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition-all active:scale-[0.98] cursor-pointer"
             >
               <Printer className="w-4 h-4" />
-              <span>طباعة / PDF</span>
+              <span>طباعة كاشير</span>
             </button>
             <button
               type="button"
               disabled={busyPdf}
               onClick={() => void handleDownloadPdf()}
-              className="min-h-[38px] px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#192b3b] text-slate-800 dark:text-slate-100 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+              className="min-h-[38px] px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#192b3b] hover:border-[#c9a24b] text-slate-800 dark:text-slate-100 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60"
             >
               <Download className="w-4 h-4 text-[#c9a24b]" />
               <span>تنزيل PDF</span>
@@ -444,7 +490,7 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
               type="button"
               disabled={busyPdf}
               onClick={() => void handleSharePdf()}
-              className="min-h-[38px] px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#192b3b] text-slate-800 dark:text-slate-100 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+              className="min-h-[38px] px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#192b3b] hover:border-emerald-500 text-slate-800 dark:text-slate-100 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60"
             >
               <Share2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
               <span>مشاركة PDF</span>
@@ -453,7 +499,7 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
               href={waInvoiceUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="min-h-[38px] px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold inline-flex items-center gap-1.5"
+              className="min-h-[38px] px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition-colors"
             >
               <MessageCircle className="w-4 h-4" />
               <span>واتساب</span>
@@ -462,156 +508,185 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
               type="button"
               onClick={onClose}
               aria-label="إغلاق الفاتورة"
-              className="min-h-[38px] min-w-[38px] rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 grid place-items-center cursor-pointer"
+              className="min-h-[38px] min-w-[38px] rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 grid place-items-center transition-colors cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        {/* Printable Invoice Sheet */}
-        <div className="p-4 sm:p-6">
-          <article className="invoice-print-sheet rounded-2xl border border-slate-200 bg-white text-slate-900 overflow-hidden">
-            {/* Invoice Brand Header */}
-            <div className="bg-gradient-to-br from-[#c9a24b] to-[#9b7626] text-white px-5 py-5 flex flex-wrap items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <span className="w-11 h-11 rounded-2xl bg-white/20 grid place-items-center">
-                  <Glasses className="w-6 h-6" />
-                </span>
-                <div>
-                  <h3 className="text-xl font-extrabold">{shopName}</h3>
-                  <p className="text-xs opacity-90">فاتورة طلب نظارة طبية</p>
-                </div>
+        {/* 80mm Thermal Cashier Receipt Sheet */}
+        <div className="p-4 sm:p-6 bg-slate-100/70 dark:bg-[#0d1722]/60 print:p-0 print:bg-white">
+          <article
+            data-receipt-format="thermal-80mm"
+            className="invoice-print-sheet w-full max-w-[340px] mx-auto rounded-xl border border-slate-300 bg-white text-slate-900 shadow-sm px-4 py-4 space-y-3 text-xs leading-snug"
+          >
+            {/* Shop Header */}
+            <header className="text-center space-y-1 pb-2.5 border-b border-dashed border-slate-400">
+              <div className="w-9 h-9 rounded-xl bg-slate-900 text-white grid place-items-center mx-auto">
+                {repair ? <Wrench className="w-4 h-4" /> : <Glasses className="w-4 h-4" />}
               </div>
-              <div className="text-left text-xs space-y-0.5">
-                <div className="font-mono-num font-bold text-sm">{invoiceNumber}</div>
-                <div className="opacity-90 tabular-nums">
-                  {formatArabicDateTime(customer.date)}
+              <h3 className="text-base font-extrabold text-slate-900">{shopName}</h3>
+              <p className="text-[11px] font-bold text-slate-700">
+                {repair ? 'إيصال تصليح نظارة' : 'إيصال طلب نظارة طبية'}
+              </p>
+              <p className="text-[11px] font-mono-num text-slate-600">
+                {invoiceNumber} · {formatArabicDateTime(activeRecord.date)}
+              </p>
+            </header>
+
+            {/* Details rows */}
+            <div className="space-y-1.5 pb-2.5 border-b border-dashed border-slate-400">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-slate-500">العميل:</span>
+                <span className="font-bold text-slate-900 text-left">{activeRecord.name}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-slate-500">الهاتف:</span>
+                <span className="font-mono-num font-semibold text-slate-900" dir="ltr">
+                  {activeRecord.phone || '—'}
+                </span>
+              </div>
+
+              {repair ? (
+                <>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-slate-500">نوع النظارة:</span>
+                    <span className="font-semibold text-left">{repair.glassesType || '—'}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-slate-500">نوع اللحام:</span>
+                    <span className="font-semibold text-left">{repair.weldingType || '—'}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-slate-500">اسم المندوب:</span>
+                    <span className="font-semibold text-left">
+                      {repair.representativeName || '—'}
+                    </span>
+                  </div>
+                  {repair.notes && (
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-slate-500 shrink-0">ملاحظات:</span>
+                      <span className="font-medium text-left">{repair.notes}</span>
+                    </div>
+                  )}
+                </>
+              ) : (
+                customer && (
+                  <>
+                    {customer.usageType && (
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-slate-500">الاستخدام:</span>
+                        <span className="font-bold text-slate-900">
+                          {USAGE_TYPE_LABELS[customer.usageType]}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-500">الشمبر:</span>
+                      <span className="font-semibold text-left">{customer.frame || '—'}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-500">العدسات:</span>
+                      <span className="font-semibold text-left">{customer.lens || '—'}</span>
+                    </div>
+                  </>
+                )
+              )}
+
+              {!repair && customer?.pickupDate && (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-500">الاستلام:</span>
+                  <span className="font-semibold tabular-nums">
+                    {formatArabicPickupDate(customer.pickupDate)}
+                  </span>
                 </div>
+              )}
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-slate-500">الحالة:</span>
+                <span className="font-bold text-slate-900">{stageLabel}</span>
               </div>
             </div>
 
-            <div className="p-5 space-y-5">
-              {/* Customer & Order Meta */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-xl bg-slate-50 border border-slate-200 p-4 text-xs sm:text-sm">
-                <div>
-                  <span className="text-slate-500">اسم العميل: </span>
-                  <span className="font-bold text-slate-900">{customer.name}</span>
+            {/* Compact Prescription Table (Customer Orders only) */}
+            {customer && (
+              <div className="pb-2.5 border-b border-dashed border-slate-400 space-y-1.5">
+                <div className="text-center font-bold text-[11px] text-slate-700">
+                  مقاسات النظر
                 </div>
-                <div>
-                  <span className="text-slate-500">رقم الهاتف: </span>
-                  <span className="font-mono-num font-semibold" dir="ltr">
-                    {customer.phone || '—'}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-slate-500">نوع الشمبر: </span>
-                  <span className="font-semibold">{customer.frame || '—'}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500">نوع العدسات: </span>
-                  <span className="font-semibold">{customer.lens || '—'}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500">موعد الاستلام: </span>
-                  <span className="font-semibold tabular-nums">
-                    {customer.pickupDate
-                      ? formatArabicPickupDate(customer.pickupDate)
-                      : 'غير محدد'}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-slate-500">حالة الطلب: </span>
-                  <span className="font-bold text-[#8f6c1e]">{stageLabel}</span>
-                </div>
-              </div>
-
-              {/* Eye Prescription Table */}
-              <div>
-                <h4 className="text-xs font-bold text-slate-500 mb-2">مقاسات النظر</h4>
-                <div className="rounded-xl border border-slate-200 overflow-hidden">
-                  <table className="w-full text-center text-xs sm:text-sm font-mono-num" dir="ltr">
-                    <thead className="bg-[#e3f2fb] text-[#8f6c1e]">
-                      <tr>
-                        <th className="py-2 px-3">EYE</th>
-                        <th className="py-2 px-3">SPH</th>
-                        <th className="py-2 px-3">CYL</th>
-                        <th className="py-2 px-3">AXIS</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200">
-                      <tr>
-                        <td className="py-2.5 px-3 font-bold">R</td>
-                        {customer.r.map((val, idx) => (
-                          <td key={idx} className="py-2.5 px-3">
-                            {val}
-                          </td>
-                        ))}
-                      </tr>
-                      <tr>
-                        <td className="py-2.5 px-3 font-bold">L</td>
-                        {customer.l.map((val, idx) => (
-                          <td key={idx} className="py-2.5 px-3">
-                            {val}
-                          </td>
-                        ))}
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* Financial Totals */}
-              <div className="grid grid-cols-3 gap-3 text-center tabular-nums">
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <div className="text-xs text-slate-500">المبلغ الكلي</div>
-                  <div className="text-base sm:text-lg font-extrabold mt-1">
-                    {customer.total} ج
+                <table
+                  className="w-full text-center text-[11px] font-mono-num border border-slate-300"
+                  dir="ltr"
+                >
+                  <thead className="bg-slate-100 text-slate-800 border-b border-slate-300">
+                    <tr>
+                      <th className="py-1 px-1.5">EYE</th>
+                      <th className="py-1 px-1.5">SPH</th>
+                      <th className="py-1 px-1.5">CYL</th>
+                      <th className="py-1 px-1.5">AXIS</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    <tr>
+                      <td className="py-1 px-1.5 font-bold">R</td>
+                      {customer.r.map((val, idx) => (
+                        <td key={idx} className="py-1 px-1.5">
+                          {val}
+                        </td>
+                      ))}
+                    </tr>
+                    <tr>
+                      <td className="py-1 px-1.5 font-bold">L</td>
+                      {customer.l.map((val, idx) => (
+                        <td key={idx} className="py-1 px-1.5">
+                          {val}
+                        </td>
+                      ))}
+                    </tr>
+                  </tbody>
+                </table>
+                {customer.add && (
+                  <div className="text-center font-mono-num text-[11px] font-bold text-slate-800" dir="ltr">
+                    ADD (L): {customer.add}
                   </div>
-                </div>
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-                  <div className="text-xs text-emerald-800">المدفوع</div>
-                  <div className="text-base sm:text-lg font-extrabold text-emerald-700 mt-1">
-                    {customer.paid} ج
-                  </div>
-                </div>
-                <div
-                  className={`rounded-xl border p-3 ${
-                    rest > 0
-                      ? 'border-rose-200 bg-rose-50'
-                      : 'border-emerald-200 bg-emerald-50'
+                )}
+              </div>
+            )}
+
+            {/* Cashier Financial Totals */}
+            <div className="space-y-1.5 pb-2.5 border-b border-dashed border-slate-400 tabular-nums">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-600">
+                  {repair ? 'تكلفة التصليح:' : 'المبلغ الكلي:'}
+                </span>
+                <span className="font-bold text-slate-900">{totalAmount} ج.م</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-600">المدفوع:</span>
+                <span className="font-bold text-emerald-700">{paidAmount} ج.م</span>
+              </div>
+              <div className="flex items-center justify-between text-sm pt-1 border-t border-slate-200">
+                <span className="font-extrabold text-slate-900">المتبقي:</span>
+                <span
+                  className={`font-extrabold ${
+                    rest > 0 ? 'text-rose-700' : 'text-emerald-700'
                   }`}
                 >
-                  <div
-                    className={`text-xs ${
-                      rest > 0 ? 'text-rose-800' : 'text-emerald-800'
-                    }`}
-                  >
-                    المبلغ المتبقي
-                  </div>
-                  <div
-                    className={`text-base sm:text-lg font-extrabold mt-1 ${
-                      rest > 0 ? 'text-rose-700' : 'text-emerald-700'
-                    }`}
-                  >
-                    {rest > 0 ? `${rest} ج` : 'خالص'}
-                  </div>
-                </div>
-              </div>
-
-              {/* Footer with QR */}
-              <div className="pt-3 border-t border-slate-200 flex flex-wrap items-center justify-between gap-4">
-                <div className="space-y-1 text-xs text-slate-600">
-                  <p className="font-bold text-slate-900">
-                    امسح الكود لمتابعة حالة نظارتك مباشرة
-                  </p>
-                  <p>شكراً لاختياركم {shopName}</p>
-                </div>
-                <div className="p-1.5 rounded-xl border border-slate-200 bg-white">
-                  <canvas ref={qrCanvasRef} />
-                </div>
+                  {rest > 0 ? `${rest} ج.م` : 'خالص'}
+                </span>
               </div>
             </div>
+
+            {/* Thermal QR & Footer */}
+            <footer className="text-center space-y-2 pt-1">
+              <div className="inline-block p-1.5 rounded-lg border border-slate-200 bg-white">
+                <canvas ref={qrCanvasRef} />
+              </div>
+              <p className="text-[11px] font-bold text-slate-800">
+                امسح الكود لمتابعة الحالة خطوة بخطوة
+              </p>
+              <p className="text-[11px] text-slate-500">شكراً لتعاملكم مع {shopName}</p>
+            </footer>
           </article>
         </div>
       </div>

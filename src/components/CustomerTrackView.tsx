@@ -1,8 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { doc, getDocFromServer, onSnapshot } from 'firebase/firestore';
-import { ArrowRight, Calendar, CheckCircle2, Glasses } from 'lucide-react';
+import { ArrowRight, Calendar, CheckCircle2, Glasses, Wrench } from 'lucide-react';
 import { db } from '../lib/firebase';
-import { CustomerRecord, EyeTuple, ORDER_STAGES } from '../types/optics';
+import {
+  CustomerRecord,
+  EyeTuple,
+  ORDER_STAGES,
+  REPAIR_STAGES,
+  RepairRecord,
+  USAGE_TYPE_LABELS,
+  UsageType,
+} from '../types/optics';
 import {
   calculateRemaining,
   formatArabicDateTime,
@@ -12,15 +20,21 @@ import {
 } from '../utils/optics';
 
 interface TrackDisplayData {
+  mode: 'customer' | 'repair';
   shopName: string;
   name: string;
   frame: string;
   lens: string;
+  glassesType: string;
+  weldingType: string;
+  representativeName: string;
   total: number | null;
   paid: number | null;
   photo: string;
   r: EyeTuple;
   l: EyeTuple;
+  add: string;
+  usageType: UsageType;
   status: number;
   hist: Array<number | null>;
   pickupDate: string;
@@ -29,13 +43,17 @@ interface TrackDisplayData {
 
 interface CustomerTrackViewProps {
   token: string;
+  mode?: 'customer' | 'repair';
   localCustomers: CustomerRecord[];
+  localRepairs?: RepairRecord[];
   onBack?: () => void;
 }
 
 export const CustomerTrackView: React.FC<CustomerTrackViewProps> = ({
   token,
+  mode = 'customer',
   localCustomers,
+  localRepairs = [],
   onBack,
 }) => {
   const [data, setData] = useState<TrackDisplayData | null>(null);
@@ -51,23 +69,58 @@ export const CustomerTrackView: React.FC<CustomerTrackViewProps> = ({
       return;
     }
 
-    // Immediate local fallback if previewed offline or on the shop device
-    const localMatch = localCustomers.find((c) => c.tok === cleanTok);
-    if (localMatch) {
+    const isRepair = mode === 'repair';
+    const localCustomer = !isRepair
+      ? localCustomers.find((c) => c.tok === cleanTok)
+      : undefined;
+    const localRepair = isRepair
+      ? localRepairs.find((r) => r.tok === cleanTok)
+      : undefined;
+
+    if (localCustomer) {
       setData({
+        mode: 'customer',
         shopName: 'Mido Optics',
-        name: localMatch.name,
-        frame: localMatch.frame,
-        lens: localMatch.lens,
-        total: localMatch.total,
-        paid: localMatch.paid,
-        photo: localMatch.photo,
-        r: localMatch.r,
-        l: localMatch.l,
-        status: localMatch.status,
-        hist: localMatch.hist,
-        pickupDate: localMatch.pickupDate || '',
-        delivered: Boolean(localMatch.delivered),
+        name: localCustomer.name,
+        frame: localCustomer.frame,
+        lens: localCustomer.lens,
+        glassesType: '',
+        weldingType: '',
+        representativeName: '',
+        total: localCustomer.total,
+        paid: localCustomer.paid,
+        photo: localCustomer.photo,
+        r: localCustomer.r,
+        l: localCustomer.l,
+        add: localCustomer.add || '',
+        usageType: localCustomer.usageType || '',
+        status: localCustomer.status,
+        hist: localCustomer.hist,
+        pickupDate: localCustomer.pickupDate || '',
+        delivered: Boolean(localCustomer.delivered),
+      });
+      setLoading(false);
+    } else if (localRepair) {
+      setData({
+        mode: 'repair',
+        shopName: 'Mido Optics',
+        name: localRepair.name,
+        frame: '',
+        lens: '',
+        glassesType: localRepair.glassesType,
+        weldingType: localRepair.weldingType,
+        representativeName: localRepair.representativeName,
+        total: localRepair.cost,
+        paid: localRepair.paid,
+        photo: '',
+        r: ['-', '-', '-'],
+        l: ['-', '-', '-'],
+        add: '',
+        usageType: '',
+        status: localRepair.status,
+        hist: localRepair.hist,
+        pickupDate: localRepair.pickupDate || '',
+        delivered: Boolean(localRepair.delivered),
       });
       setLoading(false);
     } else {
@@ -75,41 +128,83 @@ export const CustomerTrackView: React.FC<CustomerTrackViewProps> = ({
       setErrorMsg(null);
     }
 
-    const trackRef = doc(db, 'track', cleanTok);
+    const trackRef = doc(db, isRepair ? 'repairTrack' : 'track', cleanTok);
 
     const applySnapshotData = (d: Record<string, unknown>) => {
       if (!active) return;
       setErrorMsg(null);
       setLoading(false);
-      setData({
-        shopName: String(d.shopName || 'Mido Optics'),
-        name: String(d.n || ''),
-        frame: String(d.frame || ''),
-        lens: String(d.lens || ''),
-        total:
-          typeof d.total === 'number' && Number.isFinite(d.total)
-            ? d.total
-            : localMatch?.total ?? null,
-        paid:
-          typeof d.paid === 'number' && Number.isFinite(d.paid)
-            ? d.paid
-            : localMatch?.paid ?? null,
-        photo: String(d.ph || ''),
-        r: Array.isArray(d.r)
-          ? ([d.r[0] || '-', d.r[1] || '-', d.r[2] || '-'] as EyeTuple)
-          : ['-', '-', '-'],
-        l: Array.isArray(d.l)
-          ? ([d.l[0] || '-', d.l[1] || '-', d.l[2] || '-'] as EyeTuple)
-          : ['-', '-', '-'],
-        status: Number(d.s || 0),
-        hist: Array.isArray(d.h) ? (d.h as Array<number | null>) : [],
-        pickupDate: sanitizePickupDate(d.pickupDate ?? localMatch?.pickupDate ?? ''),
-        delivered:
-          typeof d.delivered === 'boolean'
-            ? d.delivered
-            : Boolean(localMatch?.delivered),
-      });
+      if (isRepair) {
+        setData({
+          mode: 'repair',
+          shopName: String(d.shopName || 'Mido Optics'),
+          name: String(d.n || ''),
+          frame: '',
+          lens: '',
+          glassesType: String(d.glassesType || ''),
+          weldingType: String(d.weldingType || ''),
+          representativeName: String(d.representativeName || ''),
+          total:
+            typeof d.cost === 'number' && Number.isFinite(d.cost)
+              ? d.cost
+              : localRepair?.cost ?? null,
+          paid:
+            typeof d.paid === 'number' && Number.isFinite(d.paid)
+              ? d.paid
+              : localRepair?.paid ?? null,
+          photo: '',
+          r: ['-', '-', '-'],
+          l: ['-', '-', '-'],
+          add: '',
+          usageType: '',
+          status: Number(d.s || 0),
+          hist: Array.isArray(d.h) ? (d.h as Array<number | null>) : [],
+          pickupDate: sanitizePickupDate(d.pickupDate ?? localRepair?.pickupDate ?? ''),
+          delivered:
+            typeof d.delivered === 'boolean'
+              ? d.delivered
+              : Boolean(localRepair?.delivered),
+        });
+      } else {
+        const rawUsage = d.usageType === 'distance' || d.usageType === 'reading' ? d.usageType : '';
+        setData({
+          mode: 'customer',
+          shopName: String(d.shopName || 'Mido Optics'),
+          name: String(d.n || ''),
+          frame: String(d.frame || ''),
+          lens: String(d.lens || ''),
+          glassesType: '',
+          weldingType: '',
+          representativeName: '',
+          total:
+            typeof d.total === 'number' && Number.isFinite(d.total)
+              ? d.total
+              : localCustomer?.total ?? null,
+          paid:
+            typeof d.paid === 'number' && Number.isFinite(d.paid)
+              ? d.paid
+              : localCustomer?.paid ?? null,
+          photo: String(d.ph || ''),
+          r: Array.isArray(d.r)
+            ? ([d.r[0] || '-', d.r[1] || '-', d.r[2] || '-'] as EyeTuple)
+            : ['-', '-', '-'],
+          l: Array.isArray(d.l)
+            ? ([d.l[0] || '-', d.l[1] || '-', d.l[2] || '-'] as EyeTuple)
+            : ['-', '-', '-'],
+          add: String(d.add ?? localCustomer?.add ?? ''),
+          usageType: rawUsage || localCustomer?.usageType || '',
+          status: Number(d.s || 0),
+          hist: Array.isArray(d.h) ? (d.h as Array<number | null>) : [],
+          pickupDate: sanitizePickupDate(d.pickupDate ?? localCustomer?.pickupDate ?? ''),
+          delivered:
+            typeof d.delivered === 'boolean'
+              ? d.delivered
+              : Boolean(localCustomer?.delivered),
+        });
+      }
     };
+
+    const hasLocalFallback = Boolean(localCustomer || localRepair);
 
     const unsub = onSnapshot(
       trackRef,
@@ -117,7 +212,6 @@ export const CustomerTrackView: React.FC<CustomerTrackViewProps> = ({
       async (snap) => {
         if (!active) return;
         if (!snap.exists()) {
-          // If result is only from empty local cache, verify directly with Firestore server
           if (snap.metadata.fromCache) {
             try {
               const serverSnap = await getDocFromServer(trackRef);
@@ -128,7 +222,7 @@ export const CustomerTrackView: React.FC<CustomerTrackViewProps> = ({
               }
             } catch {
               if (!active) return;
-              if (!localMatch) {
+              if (!hasLocalFallback) {
                 setLoading(false);
                 setErrorMsg(
                   'تعذر الاتصال بالخادم، تأكد من الاتصال بالإنترنت وأعد المحاولة.'
@@ -139,7 +233,7 @@ export const CustomerTrackView: React.FC<CustomerTrackViewProps> = ({
           }
 
           setLoading(false);
-          if (!localMatch) {
+          if (!hasLocalFallback) {
             setData(null);
             setErrorMsg(
               'لم يتم العثور على هذا الطلب، تأكد من الرابط أو من مزامنة الطلب من جهاز المحل.'
@@ -153,7 +247,7 @@ export const CustomerTrackView: React.FC<CustomerTrackViewProps> = ({
       () => {
         if (!active) return;
         setLoading(false);
-        if (!localMatch) {
+        if (!hasLocalFallback) {
           setErrorMsg('تعذر تحميل حالة الطلب حالياً، يرجى المحاولة مرة أخرى.');
         }
       }
@@ -163,9 +257,10 @@ export const CustomerTrackView: React.FC<CustomerTrackViewProps> = ({
       active = false;
       unsub();
     };
-  }, [token, localCustomers]);
+  }, [token, mode, localCustomers, localRepairs]);
 
   const stage = data ? Math.max(0, Math.min(4, data.status)) : 0;
+  const stagesList = data?.mode === 'repair' || mode === 'repair' ? REPAIR_STAGES : ORDER_STAGES;
   const hasFinancials =
     data !== null && typeof data.total === 'number' && typeof data.paid === 'number';
   const remaining = hasFinancials
@@ -180,9 +275,11 @@ export const CustomerTrackView: React.FC<CustomerTrackViewProps> = ({
     if (window.history.length > 1) {
       window.history.back();
     } else {
-      window.location.hash = '#customers';
+      window.location.hash = mode === 'repair' ? '#repairs' : '#customers';
     }
   };
+
+  const isRepairView = data?.mode === 'repair' || mode === 'repair';
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-[#f3f9fd] dark:bg-[#0d1722]">
@@ -202,19 +299,46 @@ export const CustomerTrackView: React.FC<CustomerTrackViewProps> = ({
         </div>
 
         <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#e8cf8b] to-[#a8832f] text-white grid place-items-center mx-auto">
-          <Glasses className="w-6 h-6" />
+          {isRepairView ? <Wrench className="w-6 h-6" /> : <Glasses className="w-6 h-6" />}
         </div>
 
         <div>
           <h1 className="text-xl font-extrabold">
-            {data?.name ? `متابعة نظارة ${data.name}` : 'متابعة حالة النظارة'}
+            {isRepairView
+              ? data?.name
+                ? `متابعة تصليح نظارة ${data.name}`
+                : 'متابعة حالة التصليح'
+              : data?.name
+              ? `متابعة نظارة ${data.name}`
+              : 'متابعة حالة النظارة'}
           </h1>
-          {data && (data.frame || data.lens) && (
+
+          {isRepairView && data && (
+            <div className="text-xs text-slate-500 dark:text-slate-400 mt-1 space-y-0.5">
+              {(data.glassesType || data.weldingType) && (
+                <p>{[data.glassesType, data.weldingType].filter(Boolean).join(' · ')}</p>
+              )}
+              {data.representativeName && (
+                <p className="font-semibold text-slate-600 dark:text-slate-300">
+                  المندوب المسؤول: {data.representativeName}
+                </p>
+              )}
+            </div>
+          )}
+
+          {!isRepairView && data && (data.frame || data.lens || data.usageType) && (
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              {[data.frame, data.lens].filter(Boolean).join(' · ')}
+              {[
+                data.frame,
+                data.lens,
+                data.usageType ? USAGE_TYPE_LABELS[data.usageType] : '',
+              ]
+                .filter(Boolean)
+                .join(' · ')}
             </p>
           )}
-          {data?.pickupDate && (
+
+          {!isRepairView && data?.pickupDate && (
             <p className="text-xs font-semibold text-[#8f6c1e] dark:text-[#e8cf8b] mt-1.5 inline-flex items-center gap-1.5">
               <Calendar className="w-3.5 h-3.5" />
               <span>موعد الاستلام: {formatArabicPickupDate(data.pickupDate)}</span>
@@ -234,7 +358,7 @@ export const CustomerTrackView: React.FC<CustomerTrackViewProps> = ({
 
         {data && (
           <>
-            {data.photo && data.photo.startsWith('data:image/') && (
+            {!isRepairView && data.photo && data.photo.startsWith('data:image/') && (
               <img
                 src={data.photo}
                 alt="صورة الشمبر"
@@ -243,7 +367,7 @@ export const CustomerTrackView: React.FC<CustomerTrackViewProps> = ({
               />
             )}
 
-            {/* Financial Summary: Total, Paid, Remaining */}
+            {/* Financial Summary: Total/Cost, Paid, Remaining */}
             {hasFinancials && (
               <div
                 aria-label="ملخص الحساب"
@@ -251,7 +375,7 @@ export const CustomerTrackView: React.FC<CustomerTrackViewProps> = ({
               >
                 <div>
                   <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                    المبلغ الكلي
+                    {isRepairView ? 'التكلفة' : 'المبلغ الكلي'}
                   </div>
                   <div className="text-sm sm:text-base font-extrabold mt-0.5 text-slate-900 dark:text-white">
                     {data.total} ج
@@ -282,39 +406,51 @@ export const CustomerTrackView: React.FC<CustomerTrackViewProps> = ({
               </div>
             )}
 
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-              <table className="w-full text-center text-xs font-mono-num" dir="ltr">
-                <thead className="bg-[#e3f2fb] dark:bg-[#1b3042] text-[#8f6c1e] dark:text-[#e8cf8b]">
-                  <tr>
-                    <th className="py-2 px-2"></th>
-                    <th className="py-2 px-2">SPH</th>
-                    <th className="py-2 px-2">CYL</th>
-                    <th className="py-2 px-2">AXIS</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  <tr>
-                    <td className="py-2 px-2 font-bold">R</td>
-                    {data.r.map((val, idx) => (
-                      <td key={idx} className="py-2 px-2">
-                        {val}
-                      </td>
-                    ))}
-                  </tr>
-                  <tr>
-                    <td className="py-2 px-2 font-bold">L</td>
-                    {data.l.map((val, idx) => (
-                      <td key={idx} className="py-2 px-2">
-                        {val}
-                      </td>
-                    ))}
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+            {!isRepairView && (
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+                <table className="w-full text-center text-xs font-mono-num" dir="ltr">
+                  <thead className="bg-[#e3f2fb] dark:bg-[#1b3042] text-[#8f6c1e] dark:text-[#e8cf8b]">
+                    <tr>
+                      <th className="py-2 px-2"></th>
+                      <th className="py-2 px-2">SPH</th>
+                      <th className="py-2 px-2">CYL</th>
+                      <th className="py-2 px-2">AXIS</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    <tr>
+                      <td className="py-2 px-2 font-bold">R</td>
+                      {data.r.map((val, idx) => (
+                        <td key={idx} className="py-2 px-2">
+                          {val}
+                        </td>
+                      ))}
+                    </tr>
+                    <tr>
+                      <td className="py-2 px-2 font-bold">L</td>
+                      {data.l.map((val, idx) => (
+                        <td key={idx} className="py-2 px-2">
+                          {val}
+                        </td>
+                      ))}
+                    </tr>
+                    {data.add && (
+                      <tr className="bg-[#f3f9fd]/70 dark:bg-[#1b3042]/40">
+                        <td className="py-1.5 px-2 font-bold text-[#8f6c1e] dark:text-[#e8cf8b]">
+                          ADD
+                        </td>
+                        <td colSpan={3} className="py-1.5 px-2 font-bold">
+                          {data.add}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
             <div className="space-y-2 text-right">
-              {ORDER_STAGES.map((label, idx) => {
+              {stagesList.map((label, idx) => {
                 const isDone = idx < stage;
                 const isCurrent = idx === stage;
                 const ts = data.hist?.[idx];
@@ -352,18 +488,26 @@ export const CustomerTrackView: React.FC<CustomerTrackViewProps> = ({
                 <>
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                   <span className="text-emerald-700 dark:text-emerald-400">
-                    تم تسليم النظارة للعميل بنجاح
+                    {isRepairView
+                      ? 'تم تسليم النظارة بعد التصليح بنجاح'
+                      : 'تم تسليم النظارة للعميل بنجاح'}
                   </span>
                 </>
               ) : stage === 4 ? (
                 <>
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                   <span className="text-emerald-700 dark:text-emerald-400">
-                    نظارتك جاهزة الآن، تفضل بالاستلام!
+                    {isRepairView
+                      ? 'التصليح جاهز الآن، تفضل بالاستلام!'
+                      : 'نظارتك جاهزة الآن، تفضل بالاستلام!'}
                   </span>
                 </>
               ) : (
-                <span>يتم تحديث حالة النظارة أولاً بأول</span>
+                <span>
+                  {isRepairView
+                    ? 'يتم تحديث حالة التصليح أولاً بأول'
+                    : 'يتم تحديث حالة النظارة أولاً بأول'}
+                </span>
               )}
             </p>
           </>

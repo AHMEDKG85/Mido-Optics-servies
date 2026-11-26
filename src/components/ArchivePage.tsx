@@ -164,10 +164,10 @@ export const ArchivePage: React.FC<ArchivePageProps> = ({
                         className={`font-extrabold mt-0.5 ${
                           remaining > 0
                             ? 'text-rose-600 dark:text-rose-400'
-                            : 'text-slate-700 dark:text-slate-300'
+                            : 'text-emerald-700 dark:text-emerald-400'
                         }`}
                       >
-                        {remaining} ج.م
+                        {remaining > 0 ? `${remaining} ج.م` : 'خالص'}
                       </div>
                     </div>
                   </div>
@@ -193,7 +193,7 @@ export const ArchivePage: React.FC<ArchivePageProps> = ({
                   <button
                     type="button"
                     onClick={() => onRestoreOrder(c.id)}
-                    className="col-span-2 sm:flex-1 min-h-[42px] px-3.5 py-2 rounded-xl bg-gradient-to-br from-[#d9b65c] to-[#a8832f] hover:from-[#e3c26e] hover:to-[#977427] text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+                    className="col-span-2 sm:flex-1 min-h-[42px] px-3.5 py-2 rounded-xl bg-gradient-to-br from-[#d9b65c] to-[#a8832f] hover:from-[#e3c26e] hover:to-[#977427] text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 shadow-xs transition-all active:scale-[0.98] cursor-pointer whitespace-nowrap"
                   >
                     <RotateCcw className="w-4 h-4 shrink-0" />
                     <span>استرجاع للطلبات</span>
@@ -202,7 +202,7 @@ export const ArchivePage: React.FC<ArchivePageProps> = ({
                   <button
                     type="button"
                     onClick={() => onOpenOrderModal(c)}
-                    className="min-h-[42px] px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-[#c9a24b] text-xs font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+                    className="min-h-[42px] px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#192b3b] text-slate-700 dark:text-slate-200 hover:border-[#c9a24b] text-xs font-semibold inline-flex items-center justify-center gap-1.5 shadow-xs transition-all active:scale-[0.98] cursor-pointer whitespace-nowrap"
                   >
                     <Eye className="w-4 h-4 shrink-0" />
                     <span>التفاصيل</span>
@@ -211,7 +211,7 @@ export const ArchivePage: React.FC<ArchivePageProps> = ({
                   <button
                     type="button"
                     onClick={() => onOpenInvoice(c)}
-                    className="min-h-[42px] px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-[#f3f9fd] dark:bg-[#1b3042] text-[#8f6c1e] dark:text-[#e8cf8b] hover:border-[#c9a24b] text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+                    className="min-h-[42px] px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-[#f3f9fd] dark:bg-[#1b3042] text-[#8f6c1e] dark:text-[#e8cf8b] hover:border-[#c9a24b] text-xs font-bold inline-flex items-center justify-center gap-1.5 shadow-xs transition-all active:scale-[0.98] cursor-pointer whitespace-nowrap"
                   >
                     <Printer className="w-4 h-4 shrink-0" />
                     <span>فاتورة</span>

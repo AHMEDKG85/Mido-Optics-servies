@@ -145,7 +145,7 @@ export const SyncToolbar: React.FC<SyncToolbarProps> = ({
               <button
                 type="button"
                 onClick={() => void install()}
-                className="min-h-[36px] px-3 py-1.5 rounded-lg bg-[#c9a24b]/15 hover:bg-[#c9a24b]/25 text-[#8f6c1e] dark:text-[#e8cf8b] font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+                className="min-h-[36px] px-3 py-1.5 rounded-xl bg-[#c9a24b]/15 hover:bg-[#c9a24b]/25 text-[#8f6c1e] dark:text-[#e8cf8b] font-semibold inline-flex items-center gap-1.5 shadow-xs transition-all active:scale-[0.98] cursor-pointer whitespace-nowrap"
               >
                 <Download className="w-3.5 h-3.5" />
                 <span>تثبيت التطبيق</span>
@@ -156,7 +156,7 @@ export const SyncToolbar: React.FC<SyncToolbarProps> = ({
               <button
                 type="button"
                 onClick={() => setShowIOSGuide(true)}
-                className="min-h-[36px] px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold inline-flex items-center gap-1.5 hover:bg-white/60 dark:hover:bg-slate-800 transition-colors cursor-pointer whitespace-nowrap"
+                className="min-h-[36px] px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold inline-flex items-center gap-1.5 hover:bg-white/60 dark:hover:bg-slate-800 shadow-xs transition-all active:scale-[0.98] cursor-pointer whitespace-nowrap"
               >
                 <Download className="w-3.5 h-3.5" />
                 <span>تثبيت على iPhone</span>
@@ -167,7 +167,7 @@ export const SyncToolbar: React.FC<SyncToolbarProps> = ({
               type="button"
               disabled={authBusy}
               onClick={() => void handleAuthClick()}
-              className="min-h-[36px] px-3 py-1.5 rounded-lg bg-white dark:bg-[#192b3b] border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 hover:border-[#c9a24b] font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap disabled:opacity-60"
+              className="min-h-[36px] px-3 py-1.5 rounded-xl bg-white dark:bg-[#192b3b] border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 hover:border-[#c9a24b] font-semibold inline-flex items-center gap-1.5 shadow-xs transition-all active:scale-[0.98] cursor-pointer whitespace-nowrap disabled:opacity-60"
             >
               {user ? (
                 <>
@@ -191,9 +191,9 @@ export const SyncToolbar: React.FC<SyncToolbarProps> = ({
               onClick={onToggleTheme}
               aria-label={theme === 'dark' ? 'التبديل للوضع الفاتح' : 'التبديل للوضع الداكن'}
               title={theme === 'dark' ? 'الوضع الفاتح' : 'الوضع الداكن'}
-              className="min-h-[36px] min-w-[36px] p-2 rounded-lg bg-white dark:bg-[#192b3b] border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-[#c9a24b] inline-flex items-center justify-center transition-colors cursor-pointer"
+              className="min-h-[36px] min-w-[36px] p-2 rounded-xl bg-white dark:bg-[#192b3b] border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-[#c9a24b] inline-flex items-center justify-center shadow-xs transition-all active:scale-[0.98] cursor-pointer"
             >
-              {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              {theme === 'dark' ? <Sun className="w-4 h-4 text-[#c9a24b]" /> : <Moon className="w-4 h-4 text-[#8f6c1e]" />}
             </button>
           </div>
         </div>
