@@ -63,6 +63,7 @@ export interface PriceItem {
   category: PriceItemCategory;
   price: number;
   notes: string;
+  photo?: string;
   createdAtMs: number;
   updatedAtMs: number;
 }

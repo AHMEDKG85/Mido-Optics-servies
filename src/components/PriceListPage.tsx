@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   Check,
+  Image as ImageIcon,
   Pencil,
   Plus,
   Search,
@@ -15,6 +16,7 @@ import {
   PriceItem,
   PriceItemCategory,
 } from '../types/optics';
+import { compressFramePhotoFile } from '../utils/image';
 import { filterPriceItems, formatArabicDateTime } from '../utils/optics';
 
 interface PriceListPageProps {
@@ -48,6 +50,7 @@ export const PriceListPage: React.FC<PriceListPageProps> = ({
   const [newCategory, setNewCategory] = useState<PriceItemCategory>('frame');
   const [newPrice, setNewPrice] = useState('');
   const [newNotes, setNewNotes] = useState('');
+  const [newPhoto, setNewPhoto] = useState('');
 
   // Inline edit state
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -55,6 +58,7 @@ export const PriceListPage: React.FC<PriceListPageProps> = ({
   const [editCategory, setEditCategory] = useState<PriceItemCategory>('frame');
   const [editPrice, setEditPrice] = useState('');
   const [editNotes, setEditNotes] = useState('');
+  const [editPhoto, setEditPhoto] = useState('');
 
   const counts = useMemo(() => {
     let frame = 0;
@@ -78,12 +82,29 @@ export const PriceListPage: React.FC<PriceListPageProps> = ({
     setNewCategory(categoryFilter === 'all' ? 'frame' : categoryFilter);
     setNewPrice('');
     setNewNotes('');
+    setNewPhoto('');
   };
 
   const handleOpenAdd = () => {
     setEditingId(null);
     resetAddForm();
     setShowAddForm(true);
+  };
+
+  const handlePhotoUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+    onLoaded: (dataUrl: string) => void
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const compressed = await compressFramePhotoFile(file);
+      onLoaded(compressed);
+    } catch {
+      onToast('تعذر تحميل صورة الشمبر');
+    } finally {
+      e.target.value = '';
+    }
   };
 
   const handleSubmitNew = (e: React.FormEvent) => {
@@ -104,6 +125,7 @@ export const PriceListPage: React.FC<PriceListPageProps> = ({
       category: newCategory,
       price: parsedPrice,
       notes: newNotes.trim(),
+      photo: newCategory === 'frame' ? newPhoto : '',
     });
     resetAddForm();
     setShowAddForm(false);
@@ -117,10 +139,12 @@ export const PriceListPage: React.FC<PriceListPageProps> = ({
     setEditCategory(item.category);
     setEditPrice(String(item.price));
     setEditNotes(item.notes || '');
+    setEditPhoto(item.category === 'frame' ? item.photo || '' : '');
   };
 
   const cancelEdit = () => {
     setEditingId(null);
+    setEditPhoto('');
   };
 
   const handleSaveEdit = (e: React.FormEvent, id: string) => {
@@ -142,8 +166,10 @@ export const PriceListPage: React.FC<PriceListPageProps> = ({
       category: editCategory,
       price: parsedPrice,
       notes: editNotes.trim(),
+      photo: editCategory === 'frame' ? editPhoto : '',
     });
     setEditingId(null);
+    setEditPhoto('');
     onToast('تم تحديث السعر بنجاح');
   };
 
@@ -246,7 +272,13 @@ export const PriceListPage: React.FC<PriceListPageProps> = ({
               <select
                 id="price-item-category"
                 value={newCategory}
-                onChange={(e) => setNewCategory(e.target.value as PriceItemCategory)}
+                onChange={(e) => {
+                  const nextCat = e.target.value as PriceItemCategory;
+                  setNewCategory(nextCat);
+                  if (nextCat !== 'frame') {
+                    setNewPhoto('');
+                  }
+                }}
                 className="w-full min-h-[42px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0d1722] text-sm font-semibold focus:outline-none focus:border-[#c9a24b]"
               >
                 <option value="frame">شمبر</option>
@@ -275,7 +307,7 @@ export const PriceListPage: React.FC<PriceListPageProps> = ({
               />
             </div>
 
-            <div className="sm:col-span-2 lg:col-span-3">
+            <div className={newCategory === 'frame' ? 'sm:col-span-2 lg:col-span-4' : 'sm:col-span-2 lg:col-span-3'}>
               <label
                 htmlFor="price-item-notes"
                 className="text-xs font-semibold text-slate-600 dark:text-slate-300 block mb-1"
@@ -291,6 +323,44 @@ export const PriceListPage: React.FC<PriceListPageProps> = ({
                 className="w-full min-h-[42px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0d1722] text-sm focus:outline-none focus:border-[#c9a24b]"
               />
             </div>
+
+            {newCategory === 'frame' && (
+              <div className="sm:col-span-2 lg:col-span-3 rounded-xl border border-dashed border-[#c9a24b]/60 bg-[#f3f9fd]/70 dark:bg-[#1b3042]/45 p-3">
+                <label
+                  htmlFor="price-item-photo"
+                  className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 mb-2"
+                >
+                  <ImageIcon className="w-4 h-4 text-[#c9a24b]" />
+                  <span>صورة الشمبر (اختياري — تضاف تلقائياً عند اختيار هذا الشمبر للعميل)</span>
+                </label>
+                <div className="flex flex-wrap items-center gap-3">
+                  <input
+                    id="price-item-photo"
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => void handlePhotoUpload(e, setNewPhoto)}
+                    className="flex-1 min-w-[200px] text-xs file:ml-3 file:py-2 file:px-3.5 file:rounded-lg file:border-0 file:bg-[#e3f2fb] dark:file:bg-[#1b3042] file:text-[#8f6c1e] dark:file:text-[#e8cf8b] file:font-semibold file:cursor-pointer"
+                  />
+                  {newPhoto && (
+                    <div className="flex items-center gap-2.5">
+                      <img
+                        src={newPhoto}
+                        alt="معاينة صورة الشمبر"
+                        referrerPolicy="no-referrer"
+                        className="w-14 h-14 rounded-lg border border-slate-200 dark:border-slate-700 object-cover bg-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setNewPhoto('')}
+                        className="text-xs font-semibold text-rose-600 dark:text-rose-400 underline cursor-pointer"
+                      >
+                        إزالة الصورة
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div className="flex items-end">
               <button
@@ -446,9 +516,13 @@ export const PriceListPage: React.FC<PriceListPageProps> = ({
                               <select
                                 id={`edit-cat-${item.id}`}
                                 value={editCategory}
-                                onChange={(e) =>
-                                  setEditCategory(e.target.value as PriceItemCategory)
-                                }
+                                onChange={(e) => {
+                                  const nextCat = e.target.value as PriceItemCategory;
+                                  setEditCategory(nextCat);
+                                  if (nextCat !== 'frame') {
+                                    setEditPhoto('');
+                                  }
+                                }}
                                 className="w-full min-h-[38px] px-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-[#0d1722] text-xs font-semibold"
                               >
                                 <option value="frame">شمبر</option>
@@ -506,6 +580,41 @@ export const PriceListPage: React.FC<PriceListPageProps> = ({
                                 إلغاء
                               </button>
                             </div>
+                            {editCategory === 'frame' && (
+                              <div className="col-span-12 pt-1 flex flex-wrap items-center gap-3 border-t border-slate-200/80 dark:border-slate-700/80">
+                                <label
+                                  htmlFor={`edit-photo-${item.id}`}
+                                  className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 inline-flex items-center gap-1.5"
+                                >
+                                  <ImageIcon className="w-3.5 h-3.5 text-[#c9a24b]" />
+                                  <span>صورة الشمبر:</span>
+                                </label>
+                                <input
+                                  id={`edit-photo-${item.id}`}
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={(e) => void handlePhotoUpload(e, setEditPhoto)}
+                                  className="text-xs file:ml-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-[#e3f2fb] dark:file:bg-[#15232f] file:text-[#8f6c1e] dark:file:text-[#e8cf8b] file:font-semibold file:cursor-pointer"
+                                />
+                                {editPhoto && (
+                                  <div className="flex items-center gap-2">
+                                    <img
+                                      src={editPhoto}
+                                      alt={`صورة ${editName || item.name}`}
+                                      referrerPolicy="no-referrer"
+                                      className="w-10 h-10 rounded-lg border border-slate-200 dark:border-slate-700 object-cover bg-white"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditPhoto('')}
+                                      className="text-xs text-rose-600 dark:text-rose-400 underline cursor-pointer"
+                                    >
+                                      إزالة الصورة
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </form>
                         </td>
                       </tr>
@@ -518,7 +627,17 @@ export const PriceListPage: React.FC<PriceListPageProps> = ({
                       className="hover:bg-slate-50/70 dark:hover:bg-[#1b3042]/40 transition-colors"
                     >
                       <td className="py-3 px-4 font-bold text-slate-900 dark:text-white">
-                        {item.name}
+                        <div className="flex items-center gap-2.5">
+                          {item.category === 'frame' && item.photo && (
+                            <img
+                              src={item.photo}
+                              alt={`صورة ${item.name}`}
+                              referrerPolicy="no-referrer"
+                              className="w-10 h-10 rounded-lg object-cover border border-slate-200 dark:border-slate-700 shrink-0 bg-white"
+                            />
+                          )}
+                          <span>{item.name}</span>
+                        </div>
                       </td>
                       <td className="py-3 px-4 text-xs font-semibold text-slate-600 dark:text-slate-300">
                         {PRICE_CATEGORY_LABELS[item.category]}
@@ -601,9 +720,13 @@ export const PriceListPage: React.FC<PriceListPageProps> = ({
                         <select
                           id={`m-edit-cat-${item.id}`}
                           value={editCategory}
-                          onChange={(e) =>
-                            setEditCategory(e.target.value as PriceItemCategory)
-                          }
+                          onChange={(e) => {
+                            const nextCat = e.target.value as PriceItemCategory;
+                            setEditCategory(nextCat);
+                            if (nextCat !== 'frame') {
+                              setEditPhoto('');
+                            }
+                          }}
                           className="w-full min-h-[42px] px-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0d1722] text-xs font-semibold"
                         >
                           <option value="frame">شمبر</option>
@@ -645,6 +768,41 @@ export const PriceListPage: React.FC<PriceListPageProps> = ({
                         className="w-full min-h-[42px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0d1722] text-sm"
                       />
                     </div>
+                    {editCategory === 'frame' && (
+                      <div className="rounded-xl border border-dashed border-[#c9a24b]/60 bg-[#f3f9fd]/70 dark:bg-[#1b3042]/45 p-3 space-y-2">
+                        <label
+                          htmlFor={`m-edit-photo-${item.id}`}
+                          className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5"
+                        >
+                          <ImageIcon className="w-4 h-4 text-[#c9a24b]" />
+                          <span>صورة الشمبر</span>
+                        </label>
+                        <input
+                          id={`m-edit-photo-${item.id}`}
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => void handlePhotoUpload(e, setEditPhoto)}
+                          className="w-full text-xs file:ml-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-[#e3f2fb] dark:file:bg-[#1b3042] file:text-[#8f6c1e] dark:file:text-[#e8cf8b] file:font-semibold file:cursor-pointer"
+                        />
+                        {editPhoto && (
+                          <div className="flex items-center gap-2.5">
+                            <img
+                              src={editPhoto}
+                              alt={`صورة ${editName || item.name}`}
+                              referrerPolicy="no-referrer"
+                              className="w-12 h-12 rounded-lg border border-slate-200 dark:border-slate-700 object-cover bg-white"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setEditPhoto('')}
+                              className="text-xs text-rose-600 dark:text-rose-400 underline cursor-pointer"
+                            >
+                              إزالة الصورة
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div className="flex items-center gap-2 pt-1">
                       <button
                         type="submit"
@@ -671,14 +829,24 @@ export const PriceListPage: React.FC<PriceListPageProps> = ({
                   className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#15232f] p-4 space-y-3"
                 >
                   <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <h3 className="font-bold text-sm text-slate-900 dark:text-white">
-                        {item.name}
-                      </h3>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                        {PRICE_CATEGORY_LABELS[item.category]} · آخر تحديث{' '}
-                        {formatArabicDateTime(item.updatedAtMs)}
-                      </p>
+                    <div className="flex items-start gap-2.5 min-w-0">
+                      {item.category === 'frame' && item.photo && (
+                        <img
+                          src={item.photo}
+                          alt={`صورة ${item.name}`}
+                          referrerPolicy="no-referrer"
+                          className="w-12 h-12 rounded-xl object-cover border border-slate-200 dark:border-slate-700 shrink-0 bg-white"
+                        />
+                      )}
+                      <div className="min-w-0">
+                        <h3 className="font-bold text-sm text-slate-900 dark:text-white">
+                          {item.name}
+                        </h3>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                          {PRICE_CATEGORY_LABELS[item.category]} · آخر تحديث{' '}
+                          {formatArabicDateTime(item.updatedAtMs)}
+                        </p>
+                      </div>
                     </div>
                     <div className="text-base font-extrabold text-[#8f6c1e] dark:text-[#e8cf8b] tabular-nums whitespace-nowrap shrink-0">
                       {item.price.toLocaleString('en-US')} ج.م

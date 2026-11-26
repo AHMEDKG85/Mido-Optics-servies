@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Calendar, Check, Glasses, Phone, Tag, User, X } from 'lucide-react';
 import { CustomerRecord, LensInventorySnapshot, PriceItem } from '../types/optics';
 import { CustomerInput } from '../hooks/useOpticsStore';
+import { compressFramePhotoFile } from '../utils/image';
 import {
   calculateAutoTotal,
   calculateRemaining,
@@ -47,9 +48,11 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
   const [la, setLa] = useState('');
   const [pickupDate, setPickupDate] = useState('');
   const [clockText, setClockText] = useState('');
+  const [photoFromPriceList, setPhotoFromPriceList] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
+    setPhotoFromPriceList(false);
     if (editingCustomer) {
       setName(editingCustomer.name);
       setPhone(editingCustomer.phone);
@@ -122,28 +125,18 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
 
   const rest = calculateRemaining(Number(total) || 0, Number(paid) || 0);
 
-  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const img = new Image();
-    const objectUrl = URL.createObjectURL(file);
-    img.onload = () => {
-      const scale = Math.min(1, 380 / Math.max(img.width, img.height));
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.round(img.width * scale);
-      canvas.height = Math.round(img.height * scale);
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        setPhoto(canvas.toDataURL('image/jpeg', 0.72));
-      }
-      URL.revokeObjectURL(objectUrl);
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
+    try {
+      const compressed = await compressFramePhotoFile(file);
+      setPhoto(compressed);
+      setPhotoFromPriceList(false);
+    } catch {
       onToast('تعذر تحميل الصورة');
-    };
-    img.src = objectUrl;
+    } finally {
+      e.target.value = '';
+    }
   };
 
   const handleFramePriceChange = (nextFramePrice: string) => {
@@ -164,13 +157,50 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
     }
   };
 
-  const handlePickFrameFromPriceList = (priceId: string) => {
-    const picked = framePriceItems.find((item) => item.id === priceId);
-    if (!picked) return;
+  const applySavedFrameItem = (picked: PriceItem, showFeedback = true) => {
     const nextPriceStr = String(picked.price);
     setFrame(picked.name);
     setFramePrice(nextPriceStr);
     setTotal(String(calculateAutoTotal(nextPriceStr, lensPrice)));
+    if (picked.photo) {
+      if (!photo || photoFromPriceList) {
+        setPhoto(picked.photo);
+        setPhotoFromPriceList(true);
+        if (showFeedback) {
+          onToast('تم تحديد سعر الشمبر وصورته تلقائياً من قائمة الأسعار');
+        }
+      } else if (showFeedback) {
+        onToast('تم تحديد سعر الشمبر من قائمة الأسعار');
+      }
+    } else if (photoFromPriceList) {
+      setPhoto('');
+      setPhotoFromPriceList(false);
+    }
+  };
+
+  const handlePickFrameFromPriceList = (priceId: string) => {
+    const picked = framePriceItems.find((item) => item.id === priceId);
+    if (!picked) return;
+    applySavedFrameItem(picked, true);
+  };
+
+  const handleFrameNameChange = (nextName: string) => {
+    setFrame(nextName);
+    const normalized = nextName.trim().toLowerCase();
+    if (!normalized) return;
+    const matched = framePriceItems.find(
+      (item) => item.name.trim().toLowerCase() === normalized
+    );
+    if (matched) {
+      if (!framePrice.trim()) {
+        setFramePrice(String(matched.price));
+        setTotal(String(calculateAutoTotal(String(matched.price), lensPrice)));
+      }
+      if (matched.photo && (!photo || photoFromPriceList)) {
+        setPhoto(matched.photo);
+        setPhotoFromPriceList(true);
+      }
+    }
   };
 
   const handlePickLensFromPriceList = (priceId: string) => {
@@ -311,24 +341,32 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
                 </label>
                 <input
                   id="cust-frame"
+                  list={framePriceItems.length > 0 ? 'saved-frames-datalist' : undefined}
                   value={frame}
-                  onChange={(e) => setFrame(e.target.value)}
+                  onChange={(e) => handleFrameNameChange(e.target.value)}
                   className="w-full min-h-[42px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0d1722] text-sm focus:outline-none focus:border-[#c9a24b]"
                 />
                 {framePriceItems.length > 0 && (
-                  <select
-                    aria-label="اختيار شمبر من قائمة الأسعار"
-                    value=""
-                    onChange={(e) => handlePickFrameFromPriceList(e.target.value)}
-                    className="mt-1.5 w-full min-h-[36px] px-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-[#f3f9fd] dark:bg-[#1b3042] text-xs font-semibold text-[#8f6c1e] dark:text-[#e8cf8b] focus:outline-none focus:border-[#c9a24b]"
-                  >
-                    <option value="">— اختر شمبر من قائمة الأسعار —</option>
-                    {framePriceItems.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.name} ({item.price} ج.م)
-                      </option>
-                    ))}
-                  </select>
+                  <>
+                    <datalist id="saved-frames-datalist">
+                      {framePriceItems.map((item) => (
+                        <option key={item.id} value={item.name} />
+                      ))}
+                    </datalist>
+                    <select
+                      aria-label="اختيار شمبر من قائمة الأسعار"
+                      value=""
+                      onChange={(e) => handlePickFrameFromPriceList(e.target.value)}
+                      className="mt-1.5 w-full min-h-[36px] px-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-[#f3f9fd] dark:bg-[#1b3042] text-xs font-semibold text-[#8f6c1e] dark:text-[#e8cf8b] focus:outline-none focus:border-[#c9a24b]"
+                    >
+                      <option value="">— اختر شمبر من قائمة الأسعار —</option>
+                      {framePriceItems.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.name} ({item.price} ج.م){item.photo ? ' · بصورة' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </>
                 )}
               </div>
 
@@ -524,7 +562,7 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
                 id="cust-photo"
                 type="file"
                 accept="image/*"
-                onChange={handlePhotoChange}
+                onChange={(e) => void handlePhotoChange(e)}
                 className="w-full text-xs file:ml-3 file:py-2 file:px-3.5 file:rounded-lg file:border-0 file:bg-[#e3f2fb] dark:file:bg-[#1b3042] file:text-[#8f6c1e] dark:file:text-[#e8cf8b] file:font-semibold file:cursor-pointer"
               />
               {photo && (
@@ -535,9 +573,17 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
                     referrerPolicy="no-referrer"
                     className="max-h-36 rounded-xl border border-slate-200 dark:border-slate-700 object-contain"
                   />
+                  {photoFromPriceList && (
+                    <p className="mt-1 text-[11px] font-semibold text-[#8f6c1e] dark:text-[#e8cf8b]">
+                      صورة تلقائية من قائمة الأسعار
+                    </p>
+                  )}
                   <button
                     type="button"
-                    onClick={() => setPhoto('')}
+                    onClick={() => {
+                      setPhoto('');
+                      setPhotoFromPriceList(false);
+                    }}
                     className="mt-1 block text-xs text-rose-600 dark:text-rose-400 underline cursor-pointer"
                   >
                     إزالة الصورة

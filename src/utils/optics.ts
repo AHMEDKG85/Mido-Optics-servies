@@ -319,6 +319,11 @@ export function formatArabicPickupDate(dateStr: string): string {
   });
 }
 
+export function sanitizeFramePhoto(rawPhoto: unknown): string {
+  const str = String(rawPhoto ?? '');
+  return str.startsWith('data:image/') && str.length <= 350_000 ? str : '';
+}
+
 export function normalizeCustomerRecord(raw: unknown): CustomerRecord | null {
   if (!raw || typeof raw !== 'object') return null;
   const obj = raw as Record<string, unknown>;
@@ -331,9 +336,7 @@ export function normalizeCustomerRecord(raw: unknown): CustomerRecord | null {
     : new Date().toISOString();
 
   const statusNum = Math.trunc(clampNumber(obj.status, 0, ORDER_STAGES.length - 1));
-  const rawPhoto = String(obj.photo ?? '');
-  const safePhoto =
-    rawPhoto.startsWith('data:image/') && rawPhoto.length <= 350_000 ? rawPhoto : '';
+  const safePhoto = sanitizeFramePhoto(obj.photo);
 
   const hist = sanitizeHist(obj.hist);
   if (hist.length === 0) {
@@ -1176,13 +1179,16 @@ export function normalizePriceItem(raw: unknown): PriceItem | null {
       ? Math.trunc(obj.updatedAtMs)
       : createdAtMs;
 
+  const category = normalizePriceCategory(obj.category);
+
   return {
     id: sanitizeId(obj.id, 'p'),
     ownerId: obj.ownerId ? String(obj.ownerId).slice(0, 128) : undefined,
     name,
-    category: normalizePriceCategory(obj.category),
+    category,
     price: clampNumber(obj.price),
     notes: String(obj.notes ?? '').trim().slice(0, 240),
+    photo: category === 'frame' ? sanitizeFramePhoto(obj.photo) : '',
     createdAtMs,
     updatedAtMs,
   };

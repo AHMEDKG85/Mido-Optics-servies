@@ -132,7 +132,7 @@ service cloud.firestore {
           'id', 'ownerId', 'name', 'category', 'price', 'notes', 'createdAtMs', 'updatedAtMs', 'createdAt', 'updatedAt'
         ])
         && data.keys().hasOnly([
-          'id', 'ownerId', 'name', 'category', 'price', 'notes', 'createdAtMs', 'updatedAtMs', 'createdAt', 'updatedAt'
+          'id', 'ownerId', 'name', 'category', 'price', 'notes', 'photo', 'createdAtMs', 'updatedAtMs', 'createdAt', 'updatedAt'
         ])
         && data.id is string && data.id == priceId && data.id.size() <= 64 && isValidId(data.id)
         && data.ownerId is string && data.ownerId == request.auth.uid && isValidId(data.ownerId)
@@ -140,6 +140,7 @@ service cloud.firestore {
         && data.category is string && data.category in ['frame', 'lens', 'service']
         && data.price is number && data.price >= 0 && data.price <= 10000000
         && data.notes is string && data.notes.size() <= 240
+        && (!('photo' in data) || (data.photo is string && data.photo.size() <= 350000))
         && data.createdAtMs is number && data.createdAtMs >= 0
         && data.updatedAtMs is number && data.updatedAtMs >= 0
         && data.createdAt is timestamp
@@ -253,7 +254,7 @@ service cloud.firestore {
         && incoming().createdAtMs == existing().createdAtMs
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'category', 'price', 'notes', 'updatedAtMs', 'updatedAt']);
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'category', 'price', 'notes', 'photo', 'updatedAtMs', 'updatedAt']);
 
       allow delete: if isSignedIn() && isVerified() && isValidId(priceId) && existing().ownerId == request.auth.uid;
     }

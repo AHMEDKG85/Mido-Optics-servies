@@ -26,6 +26,7 @@ import {
   parseLensInventoryBackupJson,
   renderReadyPickupMessage,
   renderWhatsAppMessage,
+  sanitizeFramePhoto,
   sanitizePickupDate,
   STARTER_PRICE_ITEMS,
 } from './optics';
@@ -541,6 +542,33 @@ test('normalizePriceItem, filterPriceItems, and STARTER_PRICE_ITEMS handle categ
 
   const allSorted = filterPriceItems(items, 'all', '');
   assert.equal(allSorted[0].id, 'custom_1');
+});
+
+test('sanitizeFramePhoto and normalizePriceItem preserve valid compressed frame photos only for frame category', () => {
+  const validDataUrl = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/';
+  assert.equal(sanitizeFramePhoto(validDataUrl), validDataUrl);
+  assert.equal(sanitizeFramePhoto('https://example.com/photo.jpg'), '');
+  assert.equal(sanitizeFramePhoto('data:image/jpeg;base64,' + 'A'.repeat(350_000)), '');
+
+  const frameWithPhoto = normalizePriceItem({
+    id: 'frame_with_photo',
+    name: 'شمبر كاريرا ذهبي',
+    category: 'frame',
+    price: 950,
+    photo: validDataUrl,
+  });
+  assert.ok(frameWithPhoto);
+  assert.equal(frameWithPhoto.photo, validDataUrl);
+
+  const lensIgnoringPhoto = normalizePriceItem({
+    id: 'lens_no_photo',
+    name: 'عدسات بلو كت',
+    category: 'lens',
+    price: 450,
+    photo: validDataUrl,
+  });
+  assert.ok(lensIgnoringPhoto);
+  assert.equal(lensIgnoringPhoto.photo, '');
 });
 
 

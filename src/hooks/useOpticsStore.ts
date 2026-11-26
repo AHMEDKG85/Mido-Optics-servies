@@ -35,6 +35,7 @@ import {
   normalizePriceItem,
   SAMPLE_CUSTOMERS,
   sanitizeEyeTuple,
+  sanitizeFramePhoto,
   sanitizeId,
   sanitizePickupDate,
   sanitizeToken,
@@ -188,6 +189,7 @@ export interface PriceItemInput {
   category: PriceItemCategory;
   price: number;
   notes?: string;
+  photo?: string;
 }
 
 export function useOpticsStore() {
@@ -429,6 +431,7 @@ export function useOpticsStore() {
       const safeCategory = normalizePriceCategory(item.category);
       const safePrice = clampNumber(item.price);
       const safeNotes = (item.notes || '').trim().slice(0, 240);
+      const safePhoto = safeCategory === 'frame' ? sanitizeFramePhoto(item.photo) : '';
       const safeCreatedAtMs = Math.max(0, Math.trunc(item.createdAtMs || Date.now()));
       const safeUpdatedAtMs = Math.max(0, Math.trunc(item.updatedAtMs || Date.now()));
 
@@ -439,6 +442,7 @@ export function useOpticsStore() {
             category: safeCategory,
             price: safePrice,
             notes: safeNotes,
+            photo: safePhoto,
             updatedAtMs: safeUpdatedAtMs,
             updatedAt: serverTimestamp(),
           });
@@ -450,6 +454,7 @@ export function useOpticsStore() {
             category: safeCategory,
             price: safePrice,
             notes: safeNotes,
+            photo: safePhoto,
             createdAtMs: safeCreatedAtMs,
             updatedAtMs: safeUpdatedAtMs,
             createdAt: serverTimestamp(),
@@ -1005,22 +1010,27 @@ export function useOpticsStore() {
       const isNew = !existing;
       const nowMs = Date.now();
 
+      const safeCategory = normalizePriceCategory(input.category);
+      const safePhoto = safeCategory === 'frame' ? sanitizeFramePhoto(input.photo) : '';
+
       const item: PriceItem = existing
         ? {
             ...existing,
             name: input.name.trim().slice(0, 120),
-            category: normalizePriceCategory(input.category),
+            category: safeCategory,
             price: clampNumber(input.price),
             notes: (input.notes || '').trim().slice(0, 240),
+            photo: safePhoto,
             updatedAtMs: nowMs,
           }
         : {
             id: generatePriceItemId(),
             ownerId: user?.uid,
             name: input.name.trim().slice(0, 120),
-            category: normalizePriceCategory(input.category),
+            category: safeCategory,
             price: clampNumber(input.price),
             notes: (input.notes || '').trim().slice(0, 240),
+            photo: safePhoto,
             createdAtMs: nowMs,
             updatedAtMs: nowMs,
           };
