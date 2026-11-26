@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mido Optics</title>
+<style>
+:root{--bg:#f3f9fd;--card:#ffffff;--tx:#1d2733;--mut:#6f8296;--gold:#c9a24b;--gold2:#e8cf8b;--gd:#a8832f;--sky:#e3f2fb;--sky2:#bfe0f3;--bd:#dcebf5;--ok:#15935a;--bad:#d64545;--sh:0 8px 24px rgba(60,110,150,.10);color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0d1722;--card:#15232f;--tx:#eef3f8;--mut:#93a7ba;--sky:#1b3042;--sky2:#2b4a63;--bd:#26394a;--sh:0 8px 24px rgba(0,0,0,.35);color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0d1722;--card:#15232f;--tx:#eef3f8;--mut:#93a7ba;--sky:#1b3042;--sky2:#2b4a63;--bd:#26394a;--sh:0 8px 24px rgba(0,0,0,.35);color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(900px 400px at 100% -10%,var(--sky2),transparent 60%),var(--bg);color:var(--tx);font-family:"Segoe UI",Tahoma,Arial,sans-serif;min-height:100vh}
+.i{width:1.15em;height:1.15em;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;vertical-align:-.2em}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:12px 18px;background:color-mix(in srgb,var(--card) 88%,transparent);backdrop-filter:blur(10px);border-bottom:2px solid var(--gold);position:sticky;top:env(safe-area-inset-top,0px);z-index:5}
+.brand{display:flex;align-items:center;gap:10px}
+.logo{width:42px;height:42px;border-radius:14px;background:linear-gradient(135deg,var(--gold2),var(--gold));display:grid;place-items:center;color:#fff;box-shadow:0 4px 12px rgba(201,162,75,.45)}
+.logo .i{width:24px;height:24px;stroke-width:2}
+h1{margin:0;font-size:22px;letter-spacing:.5px;background:linear-gradient(90deg,var(--gd),var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent}
+h1 small{display:block;font-size:11px;color:var(--mut);-webkit-text-fill-color:var(--mut);letter-spacing:2px}
+nav{display:flex;gap:6px;flex-wrap:wrap;background:var(--sky);padding:5px;border-radius:16px}
+nav a{display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:12px;color:var(--tx);text-decoration:none;font-size:14px;transition:.2s}
+nav a:hover{background:var(--card)}
+nav a.on{background:linear-gradient(135deg,var(--gold2),var(--gold));color:#fff;box-shadow:0 4px 10px rgba(201,162,75,.4)}
+button{font:inherit;cursor:pointer;border:0;border-radius:14px;padding:10px 18px;display:inline-flex;align-items:center;justify-content:center;gap:8px;background:linear-gradient(135deg,var(--gold2),var(--gold) 55%,var(--gd));color:#fff;font-weight:600;box-shadow:0 6px 16px rgba(201,162,75,.4);transition:transform .15s,box-shadow .15s}
+button:hover{transform:translateY(-2px);box-shadow:0 10px 20px rgba(201,162,75,.5)}
+button:active{transform:translateY(0)}
+button.sec{background:var(--sky);color:var(--tx);box-shadow:none;border:1px solid var(--sky2);font-weight:500}
+button.sec:hover{background:var(--sky2);box-shadow:none}
+#theme{width:42px;height:42px;padding:0;border-radius:50%}
+button.del{background:rgba(214,69,69,.1);color:var(--bad);box-shadow:none;padding:6px 8px;border-radius:10px}
+button.del:hover{background:var(--bad);color:#fff;box-shadow:none}
+main{max-width:1050px;margin:0 auto;padding:18px}
+.page{display:none}.page.on{display:block;animation:in .3s}
+@keyframes in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.bar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:center}
+.sbox{flex:1;min-width:180px;position:relative}
+.sbox .i{position:absolute;right:14px;top:50%;transform:translateY(-50%);color:var(--gold)}
+.sbox input{padding-right:42px;border-radius:14px}
+input{font:inherit;width:100%;padding:10px 12px;border-radius:12px;border:1.5px solid var(--sky2);background:var(--card);color:var(--tx);transition:.2s}
+input:focus{outline:0;border-color:var(--gold);box-shadow:0 0 0 4px rgba(201,162,75,.2)}
+input[readonly]{background:var(--sky);font-weight:700}
+.box{background:var(--card);border:1px solid var(--bd);border-radius:20px;overflow-x:auto;box-shadow:var(--sh)}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{padding:12px;text-align:right;border-bottom:1px solid var(--bd);white-space:nowrap}
+th{background:var(--sky);color:var(--gd);font-weight:700;font-size:13px}
+tbody tr:hover{background:color-mix(in srgb,var(--sky) 60%,transparent)}
+tbody tr:last-child td{border-bottom:0}
+.empty{padding:44px 20px;text-align:center;color:var(--mut)}
+.empty .i{width:46px;height:46px;color:var(--gold2);display:block;margin:0 auto 8px}
+.ok{color:var(--ok);font-weight:600}.bad{color:var(--bad);font-weight:600}
+#ov{display:none;position:fixed;inset:0;background:rgba(10,25,40,.55);backdrop-filter:blur(4px);z-index:20;align-items:center;justify-content:center;padding:12px}
+#ov.on{display:flex}
+.modal{background:var(--card);border-radius:24px;width:100%;max-width:580px;max-height:94vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.35);animation:pop .25s}
+@keyframes pop{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:none}}
+.mh{background:linear-gradient(135deg,var(--gold2),var(--gold) 60%,var(--gd));color:#fff;padding:18px 20px;display:flex;align-items:center;gap:12px}
+.mh .i{width:30px;height:30px}
+.mh h2{margin:0;font-size:19px}
+.clock{font-size:13px;opacity:.95;margin-top:2px;display:flex;gap:6px;align-items:center}
+.mb{padding:18px 20px 20px}
+.g{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+label{font-size:13px;color:var(--mut);display:flex;align-items:center;gap:5px;margin-bottom:4px}
+label .i{color:var(--gold)}
+.full{grid-column:1/-1}
+.eye{background:var(--sky);border-radius:16px;padding:12px;margin-top:14px;border:1px solid var(--sky2)}
+.eye b{display:flex;align-items:center;gap:8px;margin-bottom:8px;color:var(--gd)}
+.eye b span{background:var(--gold);color:#fff;width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-size:12px}
+.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.g3 label{justify-content:center;font-weight:700;color:var(--gd)}
+.g3 input{text-align:center}
+.acts{display:flex;gap:10px;margin-top:18px}
+.acts button{flex:1;padding:12px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin-bottom:16px}
+.card{background:var(--card);border:1px solid var(--bd);border-top:4px solid var(--gold);border-radius:18px;padding:16px;box-shadow:var(--sh);display:flex;gap:12px;align-items:center}
+.card .ic{width:46px;height:46px;border-radius:14px;background:var(--sky);color:var(--gold);display:grid;place-items:center;flex:none}
+.card .ic .i{width:26px;height:26px}
+.card small{color:var(--mut)}.card div b{display:block;font-size:17px;margin-top:2px}
+.tag{padding:4px 12px;border-radius:20px;font-size:12px;color:#fff;font-weight:600}
+.sync{font-size:12px;color:var(--mut);background:var(--sky);padding:6px 12px;border-radius:20px}.sync.on{color:var(--ok)}
+#ov2{display:none;position:fixed;inset:0;background:rgba(10,25,40,.55);backdrop-filter:blur(4px);z-index:20;align-items:center;justify-content:center;padding:12px}#ov2.on{display:flex}
+.ord{display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:space-between;padding:14px;border-radius:14px;cursor:pointer;border-bottom:1px solid var(--bd);transition:.2s}.ord:hover{background:var(--sky)}
+.ord small{display:block;color:var(--mut);direction:ltr;text-align:right}
+.dots{display:flex;gap:5px}.dots i{width:22px;height:6px;border-radius:4px;background:var(--sky2)}.dots i.f{background:var(--gold)}
+.steps{display:flex;flex-direction:column;gap:8px}
+.step{display:flex;align-items:center;gap:12px;width:100%;text-align:right;background:var(--sky);color:var(--tx);box-shadow:none;border:1.5px solid transparent;border-radius:14px;padding:10px 12px;font-weight:400}
+.step:hover{transform:none;box-shadow:none;border-color:var(--gold)}
+.step span{width:30px;height:30px;border-radius:50%;background:var(--sky2);display:grid;place-items:center;flex:none;font-weight:700}
+.step b{flex:1}.step small{color:var(--mut);font-size:11px}
+.step.d span{background:var(--ok);color:#fff}.step.c{border-color:var(--gold);background:var(--card)}.step.c span{background:var(--gold);color:#fff}
+.tr{padding:24px 16px;text-align:center;max-width:480px;margin:0 auto}.tr .steps{text-align:right;margin:14px 0}
+.cust nav,.cust .sync{display:none}
+button.ed{background:var(--sky);color:var(--gd);box-shadow:none;padding:6px 8px;border-radius:10px;margin-left:4px}button.ed:hover{background:var(--sky2);box-shadow:none}
+.tr table td,.tr table th,#o_eye td,#o_eye th{text-align:center}#o_eye table{margin-bottom:10px}
+@media(max-width:560px){.g{grid-template-columns:1fr}nav a span{display:none}}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute"><defs>
+<symbol id="glasses" viewBox="0 0 24 24"><circle cx="6" cy="15" r="4"/><circle cx="18" cy="15" r="4"/><path d="M10 15c1.3-1 2.7-1 4 0M2 15 4 7h3M22 15 20 7h-3"/></symbol>
+<symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+<symbol id="users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.5-4 3-6 6.5-6s6 2 6.5 6M16 4.5a3.5 3.5 0 0 1 0 7M18 14.5c2 .6 3.3 2.4 3.5 5.5"/></symbol>
+<symbol id="crown" viewBox="0 0 24 24"><path d="m3 8 4.5 4L12 5l4.5 7L21 8l-2 11H5z"/></symbol>
+<symbol id="spark" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z"/></symbol>
+<symbol id="moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></symbol>
+<symbol id="sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+<symbol id="down" viewBox="0 0 24 24"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14"/></symbol>
+<symbol id="up" viewBox="0 0 24 24"><path d="M12 15V4m0 0L8 8m4-4 4 4M5 20h14"/></symbol>
+<symbol id="trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
+<symbol id="cal" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/></symbol>
+<symbol id="user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c.7-4.5 4-6.5 8-6.5s7.3 2 8 6.5"/></symbol>
+<symbol id="ph" viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></symbol>
+<symbol id="cash" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="3"/><circle cx="12" cy="12" r="2.5"/></symbol>
+<symbol id="gift" viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M5 12v9h14v-9M12 8v13M12 8c-2 0-4-1-4-3s3-2 4 3c1-5 4-5 4-3s-2 3-4 3"/></symbol>
+<symbol id="edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16zM14 6l4 4"/></symbol>
+<symbol id="check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7"/></symbol>
+</defs></svg>
+<header>
+<div class="brand"><div class="logo"><svg class="i"><use href="#glasses"/></svg></div><h1>Mido Optics<small>نظارات · عدسات · عناية</small></h1></div>
+<nav>
+<a href="#customers" data-p="customers"><svg class="i"><use href="#users"/></svg><span>العملاء</span></a>
+<a href="#loyalty" data-p="loyalty"><svg class="i"><use href="#crown"/></svg><span>نظام الولاء</span></a>
+<a href="#orders" data-p="orders"><svg class="i"><use href="#glasses"/></svg><span>متابعة الطلبات</span></a>
+</nav>
+<span class="sync" id="sync">جاري الاتصال...</span><button class="sec" id="theme" title="تغيير الوضع"><svg class="i"><use id="tico" href="#moon"/></svg></button>
+</header>
+<main>
+<section class="page" id="customers">
+<div class="bar">
+<button id="add"><svg class="i"><use href="#plus"/></svg>إضافة عميل جديد</button>
+<div class="sbox"><svg class="i"><use href="#search"/></svg><input id="q" placeholder="بحث بالاسم أو الهاتف"></div>
+<button class="sec" id="exp"><svg class="i"><use href="#down"/></svg>حفظ نسخة</button>
+<button class="sec" id="imp"><svg class="i"><use href="#up"/></svg>استرجاع</button>
+<input type="file" id="file" accept=".json" hidden>
+</div>
+<div class="box"><table><thead><tr><th>التاريخ</th><th>الاسم</th><th>الهاتف</th><th>الشمبر</th><th>العدسات</th><th>الكلي</th><th>المدفوع</th><th>الباقي</th><th>اليمين</th><th>الشمال</th><th></th></tr></thead><tbody id="rows"></tbody></table><div class="empty" id="none"><svg class="i"><use href="#glasses"/></svg>لا يوجد عملاء بعد، اضغط «إضافة عميل جديد»</div></div>
+</section>
+
+<section class="page" id="loyalty">
+<div class="cards">
+<div class="card"><div class="ic"><svg class="i"><use href="#cash"/></svg></div><div><small>كل 100 جنيه مدفوعة</small><b>= 1 نقطة</b></div></div>
+<div class="card"><div class="ic"><svg class="i"><use href="#gift"/></svg></div><div><small>كل 10 نقاط</small><b>خصم 50 جنيه</b></div></div>
+<div class="card"><div class="ic"><svg class="i"><use href="#crown"/></svg></div><div><small>المستويات</small><b style="font-size:14px">برونزي · فضي 10+ · ذهبي 25+</b></div></div>
+</div>
+<div class="box"><table><thead><tr><th>العميل</th><th>الهاتف</th><th>الزيارات</th><th>إجمالي المدفوع</th><th>النقاط</th><th>المستوى</th><th>المكافأة</th></tr></thead><tbody id="lrows"></tbody></table><div class="empty" id="lnone"><svg class="i"><use href="#crown"/></svg>أضف عملاء أولاً</div></div>
+</section>
+
+<section class="page" id="orders">
+<div class="box" id="orows" style="padding:10px"></div>
+<div class="empty" id="onone"><svg class="i"><use href="#glasses"/></svg>لا توجد طلبات بعد</div>
+</section>
+<section class="page" id="track"><div class="box tr"><div class="logo" style="margin:0 auto 10px"><svg class="i"><use href="#glasses"/></svg></div><h2 id="t_name">Mido Optics</h2><div id="t_steps"></div><p id="t_msg" style="color:var(--mut)"></p></div></section>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+<div id="ov2"><div class="modal">
+<div class="mh"><svg class="i"><use href="#glasses"/></svg><div><h2 id="o_name"></h2><div class="clock" dir="ltr" id="o_phone"></div></div><button class="sec" id="o_x" style="margin-right:auto;padding:6px 12px">✕</button></div>
+<div class="mb">
+<img id="o_img" alt="" style="display:none;width:100%;max-height:200px;object-fit:contain;border-radius:14px;background:var(--sky);margin-bottom:8px"><div id="o_eye"></div>
+<div id="o_steps" class="steps"></div>
+<button id="o_next" style="width:100%;margin-top:12px">المرحلة التالية</button>
+<button class="sec" id="o_edit" style="width:100%;margin-top:8px"><svg class="i"><use href="#edit"/></svg>تعديل بيانات العميل</button>
+<div class="eye" style="text-align:center"><b style="justify-content:center">QR لمتابعة العميل</b><div id="qr" style="display:inline-block;background:#fff;padding:10px;border-radius:12px"></div>
+<input id="o_link" readonly dir="ltr" style="margin-top:10px;font-size:12px">
+<div class="acts"><button class="sec" id="o_copy">نسخ الرابط</button><a id="o_wa" target="_blank" rel="noopener" style="flex:1;text-decoration:none"><button style="width:100%">إرسال واتساب</button></a></div></div>
+</div></div></div>
+<div id="ov"><div class="modal">
+<div class="mh"><svg class="i"><use href="#glasses"/></svg><div><h2 id="ftitle">عميل جديد</h2><div class="clock"><svg class="i"><use href="#cal"/></svg><span id="clock"></span></div></div></div>
+<div class="mb">
+<div class="g">
+<div class="full"><label><svg class="i"><use href="#user"/></svg>اسم العميل</label><input id="name"></div>
+<div class="full"><label><svg class="i"><use href="#ph"/></svg>رقم الهاتف</label><input id="phone" type="tel" inputmode="tel"></div>
+<div><label><svg class="i"><use href="#glasses"/></svg>نوع الشمبر</label><input id="frame"></div>
+<div><label><svg class="i"><use href="#search"/></svg>نوع العدسات</label><input id="lens"></div>
+<div><label><svg class="i"><use href="#cash"/></svg>المبلغ الكلي</label><input id="total" type="number" min="0"></div>
+<div><label><svg class="i"><use href="#check"/></svg>المبلغ المدفوع</label><input id="paid" type="number" min="0"></div>
+<div class="full"><label>الباقي</label><input id="rest" readonly></div>
+<div class="full"><label><svg class="i"><use href="#glasses"/></svg>صورة الشمبر</label><input id="photo" type="file" accept="image/*"><img id="pprev" alt="" style="display:none;max-width:100%;max-height:160px;border-radius:12px;margin-top:8px"></div>
+</div>
+<div class="eye"><b><span>R</span>العين اليمين</b><div class="g3"><div><label>SPH</label><input id="rs"></div><div><label>CYL</label><input id="rc"></div><div><label>AXIS</label><input id="ra"></div></div></div>
+<div class="eye"><b><span>L</span>العين الشمال</b><div class="g3"><div><label>SPH</label><input id="ls"></div><div><label>CYL</label><input id="lc"></div><div><label>AXIS</label><input id="la"></div></div></div>
+<div class="acts"><button id="save"><svg class="i"><use href="#check"/></svg>حفظ العميل</button><button class="sec" id="cancel">إلغاء</button></div>
+</div></div></div>
+
+<script>
+const $=id=>document.getElementById(id);
+const KEY='mido_customers';
+let data=[];
+try{data=JSON.parse(localStorage.getItem(KEY)||'[]')}catch(e){data=[]}
+function toast(m){const t=document.createElement('div');t.textContent=m;t.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--tx);color:var(--card);padding:10px 18px;border-radius:12px;z-index:50;font-size:14px';document.body.appendChild(t);setTimeout(()=>t.remove(),2500)}
+const ST=['تم استلام الطلب','تم طلب العدسات','العدسات وصلت','جاري تركيب النظارة','النظارة جاهزة للاستلام'];
+const TRACK='https://claude.ai/artifact/5zNtE63yw1fWnw8yRwMbav';
+let cur=null,tUn=null;
+function saveTrack(c){if(db&&c.tok)db.collection('track').doc(c.tok).set({n:c.name,p:c.phone,ph:c.photo||'',r:c.r,l:c.l,s:c.status||0,h:c.hist||[]}).catch(()=>toast('تعذر تحديث المتابعة'))}
+function stepsHtml(s,h,tag){return ST.map((t,i)=>`<${tag} class="step ${i<s?'d':''} ${i==s?'c':''}" data-i="${i}"><span>${i<=s?'✓':i+1}</span><b>${t}</b><small>${h&&h[i]?fmt(h[i]):''}</small></${tag}>`).join('')}
+function orders(){$('onone').style.display=data.length?'none':'block';
+$('orows').innerHTML=data.map(c=>{const s=c.status||0;return `<div class="ord" data-id="${c.id}"><div><b>${esc(c.name)}</b><small>${esc(c.phone)}</small></div><div class="dots">${ST.map((_,i)=>`<i class="${i<=s?'f':''}"></i>`).join('')}</div><span class="tag" style="background:${s==4?'var(--ok)':'var(--gold)'}">${ST[s]}</span></div>`}).join('')}
+function openOrder(id){const c=data.find(x=>String(x.id)===String(id));if(!c)return;
+if(c.tok==null){c.tok=Math.random().toString(36).slice(2,12);c.status=0;c.hist=[new Date(c.date).getTime()];persist();saveOne(c);saveTrack(c)}
+cur=c.id;drawOrder();$('ov2').classList.add('on')}
+function waUrl(c){let ph=String(c.phone).replace(/\D/g,'');if(ph.startsWith('0'))ph='20'+ph.slice(1);return 'https://wa.me/'+ph+'?text='+encodeURIComponent('أهلاً '+c.name+'، تابع حالة نظارتك من Mido Optics من هنا: '+TRACK+'#track-'+c.tok)}
+function sendWA(c){let w=null;try{w=window.open(waUrl(c),'_blank','noopener')}catch(e){}if(!w)toast('اضغط «إرسال واتساب» لإرسال رابط المتابعة للعميل')}
+function eyeHtml(r,l){const row=(t,a)=>`<tr><td><b>${t}</b></td>${(a||[]).map(x=>`<td>${esc(x)}</td>`).join('')}</tr>`;return `<table dir="ltr"><thead><tr><th></th><th>SPH</th><th>CYL</th><th>AXIS</th></tr></thead><tbody>${row('R',r)}${row('L',l)}</tbody></table>`}
+function drawOrder(){const c=data.find(x=>x.id===cur);if(!c)return;const s=c.status||0,l=TRACK+'#track-'+c.tok;
+$('o_name').textContent=c.name;$('o_phone').textContent=c.phone;
+$('o_img').style.display=c.photo?'block':'none';if(c.photo)$('o_img').src=c.photo;
+$('o_eye').innerHTML=eyeHtml(c.r,c.l);
+$('o_steps').innerHTML=stepsHtml(s,c.hist,'button');$('o_next').style.display=s<4?'':'none';
+$('qr').innerHTML='';if(window.QRCode)new QRCode($('qr'),{text:l,width:170,height:170,colorDark:'#1d2733',colorLight:'#ffffff'});
+$('o_link').value=l;$('o_wa').href=waUrl(c)}
+function setStatus(i){const c=data.find(x=>x.id===cur);if(!c)return;const o=c.hist||[],h=[];for(let k=0;k<i;k++)h[k]=o[k]??null;h[i]=Date.now();c.status=i;c.hist=h;persist();saveOne(c);saveTrack(c);render();drawOrder()}
+function trackStart(){const tok=location.hash.slice(7);if(tUn){tUn();tUn=null}
+$('t_msg').textContent=db?'جاري التحميل...':'جاري الاتصال... سجّل الدخول بحساب Claude لعرض حالة طلبك.';
+if(!db||!tok)return;
+tUn=db.collection('track').doc(tok).onSnapshot(s=>{const d=s.data();if(!d){$('t_msg').textContent='لم يتم العثور على الطلب';$('t_steps').innerHTML='';return}
+$('t_name').textContent=d.n||'';
+$('t_steps').innerHTML=(d.p?`<div dir="ltr" style="color:var(--mut)">${esc(d.p)}</div>`:'')+(String(d.ph||'').startsWith('data:image/')?`<img src="${esc(d.ph)}" alt="" style="width:100%;max-height:220px;object-fit:contain;border-radius:14px;background:var(--sky);margin-top:12px">`:'')+'<div style="margin-top:12px">'+eyeHtml(d.r,d.l)+'</div><div class="steps">'+stepsHtml(d.s||0,d.h,'div')+'</div>';
+$('t_msg').textContent=(d.s||0)==4?'نظارتك جاهزة، تفضل بالاستلام':'بنحدّث الحالة أولاً بأول'
+},()=>{$('t_msg').textContent='تعذر تحميل الحالة'})}
+let db=null;
+function saveOne(c){if(db)db.collection('customers').doc(String(c.id)).set(c).catch(()=>toast('تعذر الحفظ على السحابة'))}
+function delOne(id){if(db)db.collection('customers').doc(String(id)).delete().catch(()=>toast('تعذر الحذف من السحابة'))}
+function setSync(on){const e=$('sync');e.textContent=on?'متزامن مع كل الأجهزة':'على هذا الجهاز فقط';e.className='sync'+(on?' on':'')}
+function persist(){try{localStorage.setItem(KEY,JSON.stringify(data))}catch(e){}}
+const fmt=d=>new Date(d).toLocaleString('ar-EG',{dateStyle:'short',timeStyle:'medium'});
+const n=v=>Number(v)||0;
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+// theme
+function setTheme(t){document.documentElement.setAttribute('data-theme',t);$('tico').setAttribute('href',t==='dark'?'#sun':'#moon');try{localStorage.setItem('mido_theme',t)}catch(e){}}
+try{const t=localStorage.getItem('mido_theme');if(t)setTheme(t)}catch(e){}
+$('theme').onclick=()=>{const cur=document.documentElement.getAttribute('data-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');setTheme(cur==='dark'?'light':'dark')};
+
+// routing
+function route(){const h=location.hash.slice(1);let p=h;const tk=h.startsWith('track-');if(tk)p='track';else if(!['customers','loyalty','orders'].includes(p))p='customers';document.body.classList.toggle('cust',tk);if(tk)trackStart();
+document.querySelectorAll('.page').forEach(s=>s.classList.toggle('on',s.id===p));
+document.querySelectorAll('nav a').forEach(a=>a.classList.toggle('on',a.dataset.p===p));}
+addEventListener('hashchange',route);
+
+// customers table
+function render(){
+const q=$('q').value.trim().toLowerCase();
+const list=data.filter(c=>!q||c.name.toLowerCase().includes(q)||c.phone.includes(q));
+$('none').style.display=list.length?'none':'block';
+$('rows').innerHTML=list.map(c=>`<tr><td>${fmt(c.date)}</td><td>${c.photo?`<img src="${esc(c.photo)}" alt="" style="width:34px;height:34px;border-radius:8px;object-fit:cover;vertical-align:middle;margin-left:6px">`:''}${esc(c.name)}</td><td>${esc(c.phone)}</td><td>${esc(c.frame)}</td><td>${esc(c.lens)}</td><td>${c.total}</td><td class="ok">${c.paid}</td><td class="${c.total-c.paid>0?'bad':'ok'}">${c.total-c.paid}</td><td dir="ltr">${esc(c.r.join(' / '))}</td><td dir="ltr">${esc(c.l.join(' / '))}</td><td><button class="ed" data-id="${c.id}"><svg class="i"><use href="#edit"/></svg></button><button class="del" data-id="${c.id}"><svg class="i"><use href="#trash"/></svg></button></td></tr>`).join('');
+loyalty();orders();
+}
+$('q').oninput=render;
+$('rows').onclick=e=>{const ed=e.target.closest('button.ed');if(ed){openForm(data.find(c=>String(c.id)===ed.dataset.id));return}const b=e.target.closest('button.del');if(!b)return;const id=b.dataset.id;
+if(b.dataset.arm){const cc=data.find(c=>String(c.id)===id);data=data.filter(c=>String(c.id)!==id);persist();delOne(id);if(db&&cc&&cc.tok)db.collection('track').doc(cc.tok).delete().catch(()=>{});render();return}
+b.dataset.arm=1;b.textContent='تأكيد الحذف؟';b.style.cssText='background:var(--bad);color:#fff';
+setTimeout(()=>{if(b.isConnected){delete b.dataset.arm;render()}},3000)};
+
+// loyalty
+function loyalty(){
+const m={};
+data.forEach(c=>{const k=c.phone||c.name;m[k]=m[k]||{name:c.name,phone:c.phone,v:0,paid:0};m[k].v++;m[k].paid+=c.paid});
+const arr=Object.values(m).map(x=>({...x,pts:Math.floor(x.paid/100)})).sort((a,b)=>b.pts-a.pts);
+$('lnone').style.display=arr.length?'none':'block';
+$('lrows').innerHTML=arr.map(x=>{const lv=x.pts>=25?['ذهبي','#d4a017']:x.pts>=10?['فضي','#8892a0']:['برونزي','#b36b2e'];
+return `<tr><td>${esc(x.name)}</td><td>${esc(x.phone)}</td><td>${x.v}</td><td>${x.paid}</td><td><b>${x.pts}</b></td><td><span class="tag" style="background:${lv[1]}">${lv[0]}</span></td><td>${x.pts>=10?'خصم '+Math.floor(x.pts/10)*50+' جنيه':'—'}</td></tr>`}).join('');
+}
+
+// modal
+let tick;
+function clock(){$('clock').textContent=new Date().toLocaleString('ar-EG',{dateStyle:'full',timeStyle:'medium'})}
+function calc(){$('rest').value=n($('total').value)-n($('paid').value)}
+$('total').oninput=$('paid').oninput=calc;
+let editId=null,photo='';
+function showPrev(){const e=$('pprev');e.src=photo;e.style.display=photo?'block':'none'}
+$('photo').onchange=e=>{const f=e.target.files[0];if(!f)return;const im=new Image(),u=URL.createObjectURL(f);im.onload=()=>{const k=Math.min(1,380/Math.max(im.width,im.height)),cv=document.createElement('canvas');cv.width=Math.round(im.width*k);cv.height=Math.round(im.height*k);cv.getContext('2d').drawImage(im,0,0,cv.width,cv.height);photo=cv.toDataURL('image/jpeg',.72);showPrev();URL.revokeObjectURL(u)};im.src=u};
+function openForm(c){editId=c?c.id:null;document.querySelectorAll('#ov input').forEach(i=>i.value='');photo=c&&c.photo||'';showPrev();
+$('ftitle').textContent=c?'تعديل بيانات العميل':'عميل جديد';
+if(c){$('name').value=c.name;$('phone').value=c.phone;$('frame').value=c.frame;$('lens').value=c.lens;$('total').value=c.total;$('paid').value=c.paid;
+[$('rs').value,$('rc').value,$('ra').value]=c.r.map(x=>x==='-'?'':x);[$('ls').value,$('lc').value,$('la').value]=c.l.map(x=>x==='-'?'':x)}
+calc();clearInterval(tick);if(c)$('clock').textContent=fmt(c.date);else{clock();tick=setInterval(clock,1000)}$('ov').classList.add('on')}
+$('add').onclick=()=>openForm();
+function close(){clearInterval(tick);$('ov').classList.remove('on')}
+$('cancel').onclick=close;
+$('save').onclick=()=>{
+const name=$('name').value.trim();
+if(!name){toast('اكتب اسم العميل');return}
+const f={name,phone:$('phone').value.trim(),frame:$('frame').value.trim(),lens:$('lens').value.trim(),total:n($('total').value),paid:n($('paid').value),r:[$('rs').value||'-',$('rc').value||'-',$('ra').value||'-'],l:[$('ls').value||'-',$('lc').value||'-',$('la').value||'-'],photo};
+let rec;const was=editId;
+if(was){rec=data.find(c=>c.id===was);Object.assign(rec,f)}
+else{rec={id:Date.now(),date:new Date().toISOString(),status:0,hist:[Date.now()],tok:Math.random().toString(36).slice(2,12),...f};data.unshift(rec)}
+persist();render();close();editId=null;
+try{saveOne(rec);saveTrack(rec)}catch(e){toast('تعذر الحفظ على السحابة')}
+if(was){if($('ov2').classList.contains('on'))drawOrder();toast('تم حفظ التعديل');return}
+location.hash='#orders';openOrder(rec.id);sendWA(rec);
+};
+// backup
+$('exp').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(data)],{type:'application/json'}));a.download='mido-optics-backup.json';a.click()};
+$('imp').onclick=()=>$('file').click();
+$('file').onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{const d=JSON.parse(r.result);if(Array.isArray(d)){data=d;persist();d.forEach(saveOne);render()}}catch(x){toast('ملف غير صالح')}};r.readAsText(f)};
+
+if(!document.documentElement.getAttribute('data-theme'))setTheme(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
+$('orows').onclick=e=>{const o=e.target.closest('.ord');if(o)openOrder(o.dataset.id)};
+$('o_steps').onclick=e=>{const b=e.target.closest('.step');if(b)setStatus(+b.dataset.i)};
+$('o_next').onclick=()=>{const c=data.find(x=>x.id===cur);if(c&&(c.status||0)<4)setStatus((c.status||0)+1)};
+$('o_edit').onclick=()=>{const c=data.find(x=>x.id===cur);if(c)openForm(c)};
+$('o_x').onclick=()=>$('ov2').classList.remove('on');
+$('ov2').onclick=e=>{if(e.target.id==='ov2')$('ov2').classList.remove('on')};
+$('o_copy').onclick=()=>{$('o_link').select();try{navigator.clipboard.writeText($('o_link').value)}catch(e){}toast('تم نسخ الرابط')};
+route();render();
+(async()=>{try{if(window.claude)db=await claude.use('db')}catch(e){db=null}
+if(!db){setSync(false);if(location.hash.startsWith('#track-'))trackStart();return}
+if(location.hash.startsWith('#track-'))trackStart();
+let first=true;
+db.collection('customers').onSnapshot(s=>{const arr=s.docs.map(d=>JSON.parse(JSON.stringify(d.data()))).sort((a,b)=>b.id-a.id);
+if(first&&!arr.length&&data.length){first=false;data.forEach(saveOne);setSync(true);return}
+first=false;data=arr;persist();render();setSync(true);if($('ov2').classList.contains('on'))drawOrder()},()=>setSync(false))})();
+</script>
+</body>
+</html>

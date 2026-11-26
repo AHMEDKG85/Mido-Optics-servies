@@ -1,0 +1,6 @@
+{
+  "name": "Mido Optics",
+  "description": "نظام إدارة عملاء محل النظارات، برنامج الولاء، ومتابعة الطلبات وإرسال رابط المتابعة عبر واتساب مع المزامنة السحابية والعمل بدون إنترنت.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,319 @@
+{
+  "entities": {
+    "Customer": {
+      "title": "Customer",
+      "description": "Optical shop customer order, prescription measurements, payment tracking, and order stage.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "description": "Unique identifier for the customer order."
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "description": "Firebase Auth UID of the shop owner."
+        },
+        "date": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 40,
+          "description": "ISO 8601 creation date string."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Customer full name."
+        },
+        "phone": {
+          "type": "string",
+          "maxLength": 30,
+          "description": "Customer phone number for WhatsApp and lookup."
+        },
+        "frame": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Eyeglass frame model or type."
+        },
+        "lens": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Optical lens type or coating."
+        },
+        "total": {
+          "type": "number",
+          "description": "Total order price in EGP."
+        },
+        "paid": {
+          "type": "number",
+          "description": "Amount paid so far in EGP."
+        },
+        "photo": {
+          "type": "string",
+          "maxLength": 350000,
+          "description": "Compressed frame JPEG data URL or empty string."
+        },
+        "r": {
+          "type": "array",
+          "description": "Right eye prescription tuple [SPH, CYL, AXIS]."
+        },
+        "l": {
+          "type": "array",
+          "description": "Left eye prescription tuple [SPH, CYL, AXIS]."
+        },
+        "status": {
+          "type": "integer",
+          "description": "Current order progress stage from 0 to 4."
+        },
+        "hist": {
+          "type": "array",
+          "description": "Timestamps in ms for each reached stage (up to 5 entries)."
+        },
+        "tok": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 32,
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "description": "Unguessable public tracking token."
+        },
+        "pickupDate": {
+          "type": "string",
+          "maxLength": 20,
+          "description": "Optional scheduled customer pickup date (YYYY-MM-DD)."
+        },
+        "delivered": {
+          "type": "boolean",
+          "description": "Whether the customer has already picked up the glasses."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last update timestamp."
+        }
+      },
+      "required": [
+        "id",
+        "ownerId",
+        "date",
+        "name",
+        "phone",
+        "frame",
+        "lens",
+        "total",
+        "paid",
+        "photo",
+        "r",
+        "l",
+        "status",
+        "hist",
+        "tok",
+        "pickupDate",
+        "delivered",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "TrackOrder": {
+      "title": "TrackOrder",
+      "description": "Publicly addressable non-PII glasses tracking status document keyed by unguessable token.",
+      "type": "object",
+      "properties": {
+        "tok": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 32,
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "description": "Tracking token matching document ID."
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "description": "Firebase Auth UID of the shop owner."
+        },
+        "customerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "description": "Reference to parent Customer document ID."
+        },
+        "shopName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Optical shop display name."
+        },
+        "n": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Customer display name without phone or email PII."
+        },
+        "frame": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Eyeglass frame model."
+        },
+        "lens": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Lens type."
+        },
+        "total": {
+          "type": "number",
+          "description": "Total order price in EGP."
+        },
+        "paid": {
+          "type": "number",
+          "description": "Amount paid so far in EGP."
+        },
+        "ph": {
+          "type": "string",
+          "maxLength": 350000,
+          "description": "Compressed frame photo data URL or empty string."
+        },
+        "r": {
+          "type": "array",
+          "description": "Right eye prescription [SPH, CYL, AXIS]."
+        },
+        "l": {
+          "type": "array",
+          "description": "Left eye prescription [SPH, CYL, AXIS]."
+        },
+        "s": {
+          "type": "integer",
+          "description": "Order stage from 0 to 4."
+        },
+        "h": {
+          "type": "array",
+          "description": "Stage completion timestamps."
+        },
+        "pickupDate": {
+          "type": "string",
+          "maxLength": 20,
+          "description": "Scheduled customer pickup date (YYYY-MM-DD) or empty string."
+        },
+        "delivered": {
+          "type": "boolean",
+          "description": "Whether the glasses have been picked up by the customer."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last update timestamp."
+        }
+      },
+      "required": [
+        "tok",
+        "ownerId",
+        "customerId",
+        "shopName",
+        "n",
+        "frame",
+        "lens",
+        "total",
+        "paid",
+        "ph",
+        "r",
+        "l",
+        "s",
+        "h",
+        "pickupDate",
+        "delivered",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ShopSettings": {
+      "title": "ShopSettings",
+      "description": "Synced per-owner WhatsApp automation and shop preferences across devices.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "description": "Firebase Auth UID of the shop owner."
+        },
+        "shopName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Shop display name."
+        },
+        "autoWhatsApp": {
+          "type": "boolean",
+          "description": "Whether to auto-prepare/open WhatsApp when adding customers or advancing order stage."
+        },
+        "waTemplate": {
+          "type": "string",
+          "maxLength": 600,
+          "description": "Customizable Arabic WhatsApp message template."
+        },
+        "publicBaseUrl": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Optional public base URL for generated customer tracking links."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last update timestamp."
+        }
+      },
+      "required": [
+        "ownerId",
+        "shopName",
+        "autoWhatsApp",
+        "waTemplate",
+        "publicBaseUrl",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/customers/{customerId}": {
+      "schema": {
+        "$ref": "#/entities/Customer"
+      },
+      "description": "Private optical shop customer records and orders, isolated per authenticated shop owner."
+    },
+    "/track/{trackId}": {
+      "schema": {
+        "$ref": "#/entities/TrackOrder"
+      },
+      "description": "Non-PII public tracking view for a specific order token, readable only via direct get by token."
+    },
+    "/settings/{userId}": {
+      "schema": {
+        "$ref": "#/entities/ShopSettings"
+      },
+      "description": "Synced shop preferences and WhatsApp automation settings for the authenticated owner."
+    }
+  }
+}
