@@ -69,3 +69,51 @@ export const ORDER_STAGES = [
 
 export const DEFAULT_WA_TEMPLATE =
   'أهلاً {name}، طلب نظارتك في {shop} وصل الآن لمرحلة: «{status}».\nتابع حالة نظارتك خطوة بخطوة من هنا:\n{link}';
+
+export interface LensSheet {
+  id: string;
+  name: string;
+  rows: string[];
+  cols: string[];
+  q: Record<string, number>;
+}
+
+export interface LensInventorySnapshot {
+  sheets: Record<string, LensSheet>;
+  sheetOrder: string[];
+  lowThresholds: Record<string, number>;
+  updatedAt: number;
+  source: 'cloud' | 'json';
+}
+
+export type EyeLensMatchStatus =
+  | 'empty'
+  | 'invalid'
+  | 'no-inventory'
+  | 'in-stock'
+  | 'low-stock'
+  | 'order-needed';
+
+export interface EyeLensAvailability {
+  eye: 'R' | 'L';
+  status: EyeLensMatchStatus;
+  sph: string;
+  cyl: string;
+  sheetId?: string;
+  sheetName?: string;
+  qty: number;
+  threshold: number;
+  transposed?: boolean;
+  message: string;
+}
+
+export interface PickupReminderSummary {
+  overdue: CustomerRecord[];
+  today: CustomerRecord[];
+  soon: CustomerRecord[];
+  totalDueCount: number;
+  title: string;
+  body: string;
+  signature: string;
+}
+

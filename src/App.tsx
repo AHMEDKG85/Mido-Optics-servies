@@ -11,13 +11,18 @@ import {
 import { StatsDashboardPage } from './components/StatsDashboardPage';
 import { CustomerFormModal } from './components/CustomerFormModal';
 import { OrderDetailModal } from './components/OrderDetailModal';
+import { InvoiceModal } from './components/InvoiceModal';
 import { CustomerTrackView } from './components/CustomerTrackView';
 import { CustomerInput, useOpticsStore } from './hooks/useOpticsStore';
+import { useLensInventory } from './hooks/useLensInventory';
+import { usePickupNotifications } from './hooks/usePickupNotifications';
 import { signInWithGoogle, signOutUser } from './lib/firebase';
 import { AppPage, CustomerRecord } from './types/optics';
 import {
+  AuthErrorSummary,
   buildTrackingUrl,
   buildWhatsAppUrl,
+  formatFirebaseAuthError,
   renderWhatsAppMessage,
 } from './utils/optics';
 
@@ -63,9 +68,13 @@ function MidoOpticsApp() {
   const [formOpen, setFormOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<CustomerRecord | null>(null);
   const [orderModalCustomerId, setOrderModalCustomerId] = useState<string | null>(null);
+  const [invoiceCustomerId, setInvoiceCustomerId] = useState<string | null>(null);
   const [pendingDispatch, setPendingDispatch] = useState<WhatsAppDispatchItem | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<AuthErrorSummary | null>(null);
   const previousPageRef = useRef<Exclude<AppPage, 'track'>>('customers');
+
+  const lensBridge = useLensInventory();
 
   // Apply theme class cleanly on <html>
   useEffect(() => {
@@ -111,6 +120,12 @@ function MidoOpticsApp() {
     window.location.hash = `#${page}`;
     setRouteState({ page, trackToken: null });
   }, []);
+
+  const pickupNotifications = usePickupNotifications({
+    customers: store.customers,
+    shopName: store.settings.shopName,
+    onNavigateToOrders: () => navigate('orders'),
+  });
 
   const prepareWhatsAppDispatch = useCallback(
     (record: CustomerRecord) => {
@@ -195,15 +210,20 @@ function MidoOpticsApp() {
   };
 
   const handleSignIn = async () => {
+    setAuthError(null);
     try {
       await signInWithGoogle();
       showToast('تم ربط الحساب بنجاح، جاري المزامنة...');
-    } catch {
-      showToast('تعذر تسجيل الدخول، تأكد من السماح بالنوافذ المنبثقة');
+    } catch (err) {
+      const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
+      const summary = formatFirebaseAuthError(err, hostname);
+      setAuthError(summary);
+      showToast(summary.title);
     }
   };
 
   const handleSignOut = async () => {
+    setAuthError(null);
     await signOutUser();
     showToast('تم تسجيل الخروج');
   };
@@ -222,93 +242,136 @@ function MidoOpticsApp() {
   const orderModalCustomer = orderModalCustomerId
     ? store.customers.find((c) => c.id === orderModalCustomerId) ?? null
     : null;
+  const invoiceCustomer = invoiceCustomerId
+    ? store.customers.find((c) => c.id === invoiceCustomerId) ?? null
+    : null;
 
   return (
     <div className="min-h-screen flex flex-col bg-[#f3f9fd] dark:bg-[#0d1722] text-[#1d2733] dark:text-[#eef3f8] pb-20 md:pb-8">
-      <Header
-        activePage={routeState.page}
-        onNavigate={navigate}
-        onAddCustomer={handleOpenAdd}
-        shopName={store.settings.shopName}
-      />
+      <div className="app-shell-print-hide flex-1 flex flex-col">
+        <Header
+          activePage={routeState.page}
+          onNavigate={navigate}
+          onAddCustomer={handleOpenAdd}
+          shopName={store.settings.shopName}
+        />
 
-      <SyncToolbar
-        user={store.user}
-        syncState={store.syncState}
-        pendingCount={store.pendingCount}
-        theme={theme}
-        onToggleTheme={() => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))}
-        onSignIn={handleSignIn}
-        onSignOut={handleSignOut}
-        onManualSync={store.flushPendingOps}
-      />
+        <SyncToolbar
+          user={store.user}
+          syncState={store.syncState}
+          syncError={store.syncError}
+          authError={authError}
+          pendingCount={store.pendingCount}
+          theme={theme}
+          onToggleTheme={() => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))}
+          onSignIn={handleSignIn}
+          onSignOut={handleSignOut}
+          onManualSync={store.flushPendingOps}
+          onDismissAuthError={() => setAuthError(null)}
+          onToast={showToast}
+        />
 
-      <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 py-5 sm:py-6">
-        {routeState.page === 'customers' && (
-          <CustomersPage
-            customers={store.customers}
-            onAddCustomer={handleOpenAdd}
-            onEditCustomer={handleOpenEdit}
-            onDeleteCustomer={store.deleteCustomer}
-            onOpenOrder={(c) => {
-              if (store.settings.autoWhatsApp) {
-                prepareWhatsAppDispatch(c);
-                navigate('orders');
-              } else {
-                setOrderModalCustomerId(c.id);
-              }
-            }}
-            onImportCustomers={store.importCustomers}
-            onLoadSampleData={store.loadSampleData}
-            onToast={showToast}
-          />
-        )}
+        <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 py-5 sm:py-6">
+          {routeState.page === 'customers' && (
+            <CustomersPage
+              customers={store.customers}
+              onAddCustomer={handleOpenAdd}
+              onEditCustomer={handleOpenEdit}
+              onDeleteCustomer={store.deleteCustomer}
+              onOpenOrder={(c) => {
+                if (store.settings.autoWhatsApp) {
+                  prepareWhatsAppDispatch(c);
+                  navigate('orders');
+                } else {
+                  setOrderModalCustomerId(c.id);
+                }
+              }}
+              onOpenInvoice={(c) => setInvoiceCustomerId(c.id)}
+              onImportCustomers={store.importCustomers}
+              onLoadSampleData={store.loadSampleData}
+              onToast={showToast}
+            />
+          )}
 
-        {routeState.page === 'loyalty' && (
-          <LoyaltyPage customers={store.customers} />
-        )}
+          {routeState.page === 'loyalty' && (
+            <LoyaltyPage customers={store.customers} />
+          )}
 
-        {routeState.page === 'orders' && (
-          <OrdersWhatsAppPage
-            customers={store.customers}
-            settings={store.settings}
-            isCloudSignedIn={Boolean(store.user && store.user.emailVerified)}
-            pendingDispatch={pendingDispatch}
-            onClearDispatch={() => setPendingDispatch(null)}
-            onUpdateSettings={store.updateSettings}
-            onAdvanceStage={handleAdvanceStage}
-            onMarkDelivered={handleMarkDelivered}
-            onOpenOrderModal={(c) => setOrderModalCustomerId(c.id)}
-            onToast={showToast}
-          />
-        )}
+          {routeState.page === 'orders' && (
+            <OrdersWhatsAppPage
+              customers={store.customers}
+              settings={store.settings}
+              isCloudSignedIn={Boolean(store.user && store.user.emailVerified)}
+              pendingDispatch={pendingDispatch}
+              notificationPermission={pickupNotifications.permission}
+              notificationsEnabled={pickupNotifications.enabled}
+              dueTodayCount={pickupNotifications.summary.today.length}
+              overdueCount={pickupNotifications.summary.overdue.length}
+              lensBridge={lensBridge}
+              onEnableNotifications={async () => {
+                const res = await pickupNotifications.enableAndNotify();
+                if (res.reason === 'denied') {
+                  showToast('المتصفح حظر الإشعارات، اسمح بها من إعدادات الموقع');
+                } else if (res.reason === 'granted') {
+                  showToast('تم تفعيل تنبيهات مواعيد التسليم بنجاح');
+                }
+              }}
+              onToggleNotifications={pickupNotifications.toggleEnabled}
+              onSendReminderNow={async () => {
+                const ok = await pickupNotifications.sendReminderNow();
+                showToast(
+                  ok
+                    ? 'تم إرسال تنبيه مواعيد التسليم عبر المتصفح'
+                    : 'تأكد من السماح بالإشعارات في المتصفح'
+                );
+              }}
+              onClearDispatch={() => setPendingDispatch(null)}
+              onUpdateSettings={store.updateSettings}
+              onAdvanceStage={handleAdvanceStage}
+              onMarkDelivered={handleMarkDelivered}
+              onOpenOrderModal={(c) => setOrderModalCustomerId(c.id)}
+              onOpenInvoice={(c) => setInvoiceCustomerId(c.id)}
+              onToast={showToast}
+            />
+          )}
 
-        {routeState.page === 'stats' && (
-          <StatsDashboardPage customers={store.customers} />
-        )}
-      </main>
+          {routeState.page === 'stats' && (
+            <StatsDashboardPage customers={store.customers} />
+          )}
+        </main>
 
-      <CustomerFormModal
-        isOpen={formOpen}
-        editingCustomer={editingCustomer}
-        onClose={() => {
-          setFormOpen(false);
-          setEditingCustomer(null);
-        }}
-        onSave={handleSaveCustomer}
-        onToast={showToast}
-      />
+        <CustomerFormModal
+          isOpen={formOpen}
+          editingCustomer={editingCustomer}
+          lensInventory={lensBridge.inventory}
+          onClose={() => {
+            setFormOpen(false);
+            setEditingCustomer(null);
+          }}
+          onSave={handleSaveCustomer}
+          onToast={showToast}
+        />
 
-      <OrderDetailModal
-        customer={orderModalCustomer}
+        <OrderDetailModal
+          customer={orderModalCustomer}
+          settings={store.settings}
+          lensInventory={lensBridge.inventory}
+          onClose={() => setOrderModalCustomerId(null)}
+          onSetStage={handleAdvanceStage}
+          onMarkDelivered={handleMarkDelivered}
+          onEditCustomer={(c) => {
+            setOrderModalCustomerId(null);
+            handleOpenEdit(c);
+          }}
+          onOpenInvoice={(c) => setInvoiceCustomerId(c.id)}
+          onToast={showToast}
+        />
+      </div>
+
+      <InvoiceModal
+        customer={invoiceCustomer}
         settings={store.settings}
-        onClose={() => setOrderModalCustomerId(null)}
-        onSetStage={handleAdvanceStage}
-        onMarkDelivered={handleMarkDelivered}
-        onEditCustomer={(c) => {
-          setOrderModalCustomerId(null);
-          handleOpenEdit(c);
-        }}
+        onClose={() => setInvoiceCustomerId(null)}
         onToast={showToast}
       />
 
@@ -316,7 +379,7 @@ function MidoOpticsApp() {
         <div
           role="status"
           aria-live="polite"
-          className="fixed bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-xl bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 text-xs sm:text-sm font-semibold shadow-lg whitespace-nowrap"
+          className="print:hidden fixed bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-xl bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 text-xs sm:text-sm font-semibold shadow-lg whitespace-nowrap"
         >
           {toastMsg}
         </div>

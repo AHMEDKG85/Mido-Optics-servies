@@ -9,9 +9,15 @@ import {
   ExternalLink,
   Glasses,
   MessageCircle,
+  Printer,
   X,
 } from 'lucide-react';
-import { CustomerRecord, ORDER_STAGES, ShopSettings } from '../types/optics';
+import {
+  CustomerRecord,
+  LensInventorySnapshot,
+  ORDER_STAGES,
+  ShopSettings,
+} from '../types/optics';
 import {
   buildTrackingUrl,
   buildWhatsAppUrl,
@@ -19,24 +25,29 @@ import {
   formatArabicPickupDate,
   getPickupUrgency,
 } from '../utils/optics';
+import { EyeLensStatusBadge } from './EyeLensStatusBadge';
 
 interface OrderDetailModalProps {
   customer: CustomerRecord | null;
   settings: ShopSettings;
+  lensInventory: LensInventorySnapshot | null;
   onClose: () => void;
   onSetStage: (customerId: string, stage: number) => void;
   onMarkDelivered: (customerId: string) => void;
   onEditCustomer: (customer: CustomerRecord) => void;
+  onOpenInvoice: (customer: CustomerRecord) => void;
   onToast: (msg: string) => void;
 }
 
 export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   customer,
   settings,
+  lensInventory,
   onClose,
   onSetStage,
   onMarkDelivered,
   onEditCustomer,
+  onOpenInvoice,
   onToast,
 }) => {
   const qrCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -185,6 +196,22 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
             </table>
           </div>
 
+          {/* Automatic R & L Lens Inventory Check */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <EyeLensStatusBadge
+              eye="R"
+              tuple={customer.r}
+              inventory={lensInventory}
+              compact
+            />
+            <EyeLensStatusBadge
+              eye="L"
+              tuple={customer.l}
+              inventory={lensInventory}
+              compact
+            />
+          </div>
+
           {/* 5 Stages */}
           <div className="space-y-2">
             {ORDER_STAGES.map((label, idx) => {
@@ -248,12 +275,21 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
             <button
               type="button"
               onClick={() => onEditCustomer(customer)}
-              className={`min-h-[44px] px-4 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-sm font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer ${
-                stage >= 4 && customer.delivered ? 'sm:col-span-2' : ''
-              }`}
+              className="min-h-[44px] px-4 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-sm font-semibold inline-flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <Edit3 className="w-4 h-4" />
               <span>تعديل بيانات العميل</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                onOpenInvoice(customer);
+              }}
+              className="min-h-[44px] px-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-[#f3f9fd] dark:bg-[#1b3042] text-[#8f6c1e] dark:text-[#e8cf8b] text-sm font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <Printer className="w-4 h-4" />
+              <span>فاتورة / PDF</span>
             </button>
           </div>
 

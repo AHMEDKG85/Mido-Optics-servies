@@ -1,12 +1,16 @@
 import React, { useState } from 'react';
+import { User } from 'firebase/auth';
 import {
   AlertTriangle,
   ArrowLeft,
+  Bell,
+  BellOff,
   Calendar,
   CheckCircle2,
   Copy,
   MessageCircle,
   PackageCheck,
+  Printer,
   QrCode,
   Search,
   Settings2,
@@ -15,10 +19,12 @@ import {
 import {
   CustomerRecord,
   DEFAULT_WA_TEMPLATE,
+  LensInventorySnapshot,
   ORDER_STAGES,
   ShopSettings,
 } from '../types/optics';
 import {
+  AuthErrorSummary,
   buildTrackingUrl,
   buildWhatsAppUrl,
   formatArabicDateTime,
@@ -27,6 +33,9 @@ import {
   renderWhatsAppMessage,
   resolvePublicOrigin,
 } from '../utils/optics';
+import { NotificationPermissionState } from '../hooks/usePickupNotifications';
+import { EyeLensStatusBadge } from './EyeLensStatusBadge';
+import { LensInventoryPanel } from './LensInventoryPanel';
 
 export interface WhatsAppDispatchItem {
   customer: CustomerRecord;
@@ -41,11 +50,33 @@ interface OrdersWhatsAppPageProps {
   settings: ShopSettings;
   isCloudSignedIn: boolean;
   pendingDispatch: WhatsAppDispatchItem | null;
+  notificationPermission: NotificationPermissionState;
+  notificationsEnabled: boolean;
+  dueTodayCount: number;
+  overdueCount: number;
+  lensBridge: {
+    lensUser: User | null;
+    inventory: LensInventorySnapshot | null;
+    summary: { sheetCount: number; stockedPowersCount: number; totalUnits: number };
+    connecting: boolean;
+    authError: AuthErrorSummary | null;
+    syncError: string | null;
+    firebaseProjectId: string;
+    connectCloud: () => Promise<boolean>;
+    disconnectCloud: () => Promise<void>;
+    importJsonText: (jsonText: string) => LensInventorySnapshot;
+    clearInventory: () => void;
+    dismissError: () => void;
+  };
+  onEnableNotifications: () => Promise<void>;
+  onToggleNotifications: () => void;
+  onSendReminderNow: () => Promise<void>;
   onClearDispatch: () => void;
   onUpdateSettings: (patch: Partial<ShopSettings>) => Promise<void>;
   onAdvanceStage: (customerId: string, nextStage: number) => void;
   onMarkDelivered: (customerId: string) => void;
   onOpenOrderModal: (customer: CustomerRecord) => void;
+  onOpenInvoice: (customer: CustomerRecord) => void;
   onToast: (msg: string) => void;
 }
 
@@ -54,11 +85,20 @@ export const OrdersWhatsAppPage: React.FC<OrdersWhatsAppPageProps> = ({
   settings,
   isCloudSignedIn,
   pendingDispatch,
+  notificationPermission,
+  notificationsEnabled,
+  dueTodayCount,
+  overdueCount,
+  lensBridge,
+  onEnableNotifications,
+  onToggleNotifications,
+  onSendReminderNow,
   onClearDispatch,
   onUpdateSettings,
   onAdvanceStage,
   onMarkDelivered,
   onOpenOrderModal,
+  onOpenInvoice,
   onToast,
 }) => {
   const [filter, setFilter] = useState<'all' | 'active' | 'ready' | 'due'>('all');
@@ -232,6 +272,86 @@ export const OrdersWhatsAppPage: React.FC<OrdersWhatsAppPageProps> = ({
           </div>
         )}
       </div>
+
+      {/* Browser Web Notifications Panel for Overdue & Due-Today Orders */}
+      <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#15232f] p-4 sm:p-5 flex flex-wrap items-center justify-between gap-3">
+        <div className="space-y-1">
+          <h2 className="text-base font-extrabold flex items-center gap-2">
+            {notificationPermission === 'granted' && notificationsEnabled ? (
+              <Bell className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+            ) : (
+              <BellOff className="w-5 h-5 text-[#c9a24b]" />
+            )}
+            <span>تنبيهات المتصفح لمواعيد الاستلام</span>
+          </h2>
+          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
+            {notificationPermission === 'unsupported'
+              ? 'هذا المتصفح لا يدعم إشعارات الويب.'
+              : notificationPermission === 'denied'
+              ? 'تم حظر الإشعارات من المتصفح — اسمح بالإشعارات من إعدادات الموقع في شريط العنوان.'
+              : overdueCount > 0 || dueTodayCount > 0
+              ? `يوجد حالياً ${overdueCount} طلب متأخر و ${dueTodayCount} طلب موعد استلامه اليوم.`
+              : 'تُرسل تنبيهات تلقائية عند اقتراب أو تأخر أي موعد تسليم.'}
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {notificationPermission === 'granted' ? (
+            <>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={notificationsEnabled}
+                onClick={onToggleNotifications}
+                className={`min-h-[40px] px-3.5 py-1.5 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 border cursor-pointer ${
+                  notificationsEnabled
+                    ? 'bg-emerald-600 border-emerald-600 text-white'
+                    : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200'
+                }`}
+              >
+                <Bell className="w-4 h-4" />
+                <span>
+                  {notificationsEnabled ? 'التنبيهات: مُفعّلة' : 'التنبيهات: متوقفة'}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => void onSendReminderNow()}
+                className="min-h-[40px] px-3.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#192b3b] text-xs font-semibold text-slate-700 dark:text-slate-200 hover:border-[#c9a24b] cursor-pointer"
+              >
+                إرسال تذكير الآن
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              disabled={notificationPermission === 'unsupported'}
+              onClick={() => void onEnableNotifications()}
+              className="min-h-[40px] px-4 py-1.5 rounded-xl bg-gradient-to-br from-[#d9b65c] to-[#a8832f] text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+            >
+              <Bell className="w-4 h-4" />
+              <span>تفعيل تنبيهات المتصفح</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Lens Inventory Integration Panel */}
+      <LensInventoryPanel
+        lensUser={lensBridge.lensUser}
+        inventory={lensBridge.inventory}
+        summary={lensBridge.summary}
+        connecting={lensBridge.connecting}
+        authError={lensBridge.authError}
+        syncError={lensBridge.syncError}
+        firebaseProjectId={lensBridge.firebaseProjectId}
+        onConnectCloud={lensBridge.connectCloud}
+        onDisconnectCloud={lensBridge.disconnectCloud}
+        onImportJsonText={lensBridge.importJsonText}
+        onClearInventory={lensBridge.clearInventory}
+        onDismissError={lensBridge.dismissError}
+        onToast={onToast}
+      />
 
       {/* Auto-Prepared WhatsApp Dispatch Card */}
       {pendingDispatch && (
@@ -483,6 +603,23 @@ export const OrdersWhatsAppPage: React.FC<OrdersWhatsAppPageProps> = ({
                       {urgency.label && <span>{urgency.label}</span>}
                     </div>
                   )}
+
+                  {lensBridge.inventory && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                      <EyeLensStatusBadge
+                        eye="R"
+                        tuple={c.r}
+                        inventory={lensBridge.inventory}
+                        compact
+                      />
+                      <EyeLensStatusBadge
+                        eye="L"
+                        tuple={c.l}
+                        inventory={lensBridge.inventory}
+                        compact
+                      />
+                    </div>
+                  )}
                 </div>
 
                 {/* Quick Actions: Advance Stage + Mark Delivered + WhatsApp + Copy + QR */}
@@ -540,6 +677,16 @@ export const OrdersWhatsAppPage: React.FC<OrdersWhatsAppPageProps> = ({
                     className="min-h-[42px] min-w-[42px] px-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-[#c9a24b] inline-flex items-center justify-center cursor-pointer shrink-0"
                   >
                     <Copy className="w-4 h-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => onOpenInvoice(c)}
+                    aria-label={`فاتورة ${c.name}`}
+                    title="طباعة / مشاركة فاتورة PDF"
+                    className="min-h-[42px] min-w-[42px] px-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-[#8f6c1e] dark:text-[#e8cf8b] hover:border-[#c9a24b] inline-flex items-center justify-center cursor-pointer shrink-0"
+                  >
+                    <Printer className="w-4 h-4" />
                   </button>
 
                   <button

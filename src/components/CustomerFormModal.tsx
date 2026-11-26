@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { Calendar, Check, Glasses, Phone, User, X } from 'lucide-react';
-import { CustomerRecord } from '../types/optics';
+import { CustomerRecord, LensInventorySnapshot } from '../types/optics';
 import { CustomerInput } from '../hooks/useOpticsStore';
 import { calculateRemaining, formatArabicDateTime } from '../utils/optics';
+import { EyeLensStatusBadge } from './EyeLensStatusBadge';
 
 interface CustomerFormModalProps {
   isOpen: boolean;
   editingCustomer: CustomerRecord | null;
+  lensInventory: LensInventorySnapshot | null;
   onClose: () => void;
   onSave: (input: CustomerInput) => void;
   onToast: (msg: string) => void;
@@ -15,6 +17,7 @@ interface CustomerFormModalProps {
 export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
   isOpen,
   editingCustomer,
+  lensInventory,
   onClose,
   onSave,
   onToast,
@@ -368,6 +371,13 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
                 </div>
               ))}
             </div>
+            <div className="mt-2.5">
+              <EyeLensStatusBadge
+                eye="R"
+                tuple={[rs.trim() || '-', rc.trim() || '-', ra.trim() || '-']}
+                inventory={lensInventory}
+              />
+            </div>
           </div>
 
           {/* Left Eye */}
@@ -399,6 +409,13 @@ export const CustomerFormModal: React.FC<CustomerFormModalProps> = ({
                   />
                 </div>
               ))}
+            </div>
+            <div className="mt-2.5">
+              <EyeLensStatusBadge
+                eye="L"
+                tuple={[ls.trim() || '-', lc.trim() || '-', la.trim() || '-']}
+                inventory={lensInventory}
+              />
             </div>
           </div>
 

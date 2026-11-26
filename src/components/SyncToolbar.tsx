@@ -1,42 +1,63 @@
 import React, { useState } from 'react';
 import { User } from 'firebase/auth';
 import {
+  AlertCircle,
   Cloud,
   CloudOff,
+  Copy,
   Download,
   LogIn,
   LogOut,
   Moon,
   RefreshCw,
   Sun,
+  X,
 } from 'lucide-react';
 import { SyncState } from '../types/optics';
+import { AuthErrorSummary } from '../utils/optics';
 import { usePWAInstall } from '../hooks/usePWAInstall';
 
 interface SyncToolbarProps {
   user: User | null;
   syncState: SyncState;
+  syncError: string | null;
+  authError: AuthErrorSummary | null;
   pendingCount: number;
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
   onSignIn: () => Promise<void>;
   onSignOut: () => Promise<void>;
   onManualSync: () => Promise<void>;
+  onDismissAuthError: () => void;
+  onToast: (msg: string) => void;
 }
 
 export const SyncToolbar: React.FC<SyncToolbarProps> = ({
   user,
   syncState,
+  syncError,
+  authError,
   pendingCount,
   theme,
   onToggleTheme,
   onSignIn,
   onSignOut,
   onManualSync,
+  onDismissAuthError,
+  onToast,
 }) => {
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
   const [showIOSGuide, setShowIOSGuide] = useState(false);
   const [authBusy, setAuthBusy] = useState(false);
+
+  const handleCopyHostname = async (hostname: string) => {
+    try {
+      await navigator.clipboard.writeText(hostname);
+      onToast(`تم نسخ النطاق: ${hostname}`);
+    } catch {
+      onToast(hostname);
+    }
+  };
 
   const handleAuthClick = async () => {
     setAuthBusy(true);
@@ -174,6 +195,58 @@ export const SyncToolbar: React.FC<SyncToolbarProps> = ({
             </button>
           </div>
         </div>
+
+        {(authError || syncError || (user && !user.emailVerified)) && (
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-2.5">
+            <div
+              role="alert"
+              className="rounded-xl border border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/45 px-3.5 py-2.5 text-xs text-rose-900 dark:text-rose-200 flex flex-wrap items-center justify-between gap-2.5"
+            >
+              <div className="flex items-start gap-2 min-w-0">
+                <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                <div className="space-y-0.5 min-w-0">
+                  <p className="font-bold">
+                    {authError
+                      ? authError.title
+                      : user && !user.emailVerified
+                      ? 'بريد هذا الحساب غير مُفعّل للمزامنة السحابية'
+                      : 'تعذر إتمام المزامنة مع السحابة'}
+                  </p>
+                  <p className="opacity-90 break-words">
+                    {authError
+                      ? authError.details
+                      : user && !user.emailVerified
+                      ? 'سجّل الدخول بحساب Google مُفعّل لتفعيل المزامنة بين الأجهزة.'
+                      : syncError}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                {authError?.isUnauthorizedDomain && authError.hostname && (
+                  <button
+                    type="button"
+                    onClick={() => void handleCopyHostname(authError.hostname)}
+                    className="min-h-[34px] px-3 py-1 rounded-lg bg-rose-700 hover:bg-rose-800 text-white font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>نسخ النطاق ({authError.hostname})</span>
+                  </button>
+                )}
+                {authError && (
+                  <button
+                    type="button"
+                    onClick={onDismissAuthError}
+                    aria-label="إغلاق تنبيه الخطأ"
+                    className="min-h-[34px] min-w-[34px] rounded-lg hover:bg-rose-200/60 dark:hover:bg-rose-900/50 grid place-items-center cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {showIOSGuide && (

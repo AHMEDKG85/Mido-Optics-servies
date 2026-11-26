@@ -5,6 +5,7 @@ import {
   Eye,
   Glasses,
   Plus,
+  Printer,
   Search,
   Send,
   Trash2,
@@ -23,6 +24,7 @@ interface CustomersPageProps {
   onEditCustomer: (customer: CustomerRecord) => void;
   onDeleteCustomer: (id: string) => void;
   onOpenOrder: (customer: CustomerRecord) => void;
+  onOpenInvoice: (customer: CustomerRecord) => void;
   onImportCustomers: (rawList: unknown[]) => number;
   onLoadSampleData: () => number;
   onToast: (msg: string) => void;
@@ -34,6 +36,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
   onEditCustomer,
   onDeleteCustomer,
   onOpenOrder,
+  onOpenInvoice,
   onImportCustomers,
   onLoadSampleData,
   onToast,
@@ -287,6 +290,15 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
                         <div className="flex items-center justify-end gap-1">
                           <button
                             type="button"
+                            onClick={() => onOpenInvoice(c)}
+                            aria-label={`فاتورة ${c.name}`}
+                            title="فاتورة للطباعة / PDF"
+                            className="min-h-[36px] min-w-[36px] px-2 rounded-lg bg-[#f3f9fd] dark:bg-[#1b3042] text-[#8f6c1e] dark:text-[#e8cf8b] hover:bg-[#e3f2fb] dark:hover:bg-[#254057] inline-flex items-center justify-center cursor-pointer"
+                          >
+                            <Printer className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => onOpenOrder(c)}
                             aria-label={`متابعة وواتساب ${c.name}`}
                             title="متابعة الطلب وواتساب"
@@ -423,6 +435,15 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
                   </div>
 
                   <div className="flex items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => onOpenInvoice(c)}
+                      aria-label={`فاتورة ${c.name}`}
+                      className="min-h-[44px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#192b3b] text-[#8f6c1e] dark:text-[#e8cf8b] font-semibold text-xs inline-flex items-center justify-center gap-1 cursor-pointer"
+                    >
+                      <Printer className="w-4 h-4" />
+                      <span>فاتورة</span>
+                    </button>
                     <button
                       type="button"
                       onClick={() => onOpenOrder(c)}

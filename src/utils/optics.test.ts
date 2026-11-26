@@ -2,15 +2,22 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   advanceHist,
+  buildSinglePagePdfFromJpeg,
   buildTrackingUrl,
   buildWhatsAppUrl,
   calculateLoyaltySummary,
   calculateMonthlyCustomerGrowth,
   calculateOrderReadinessStats,
   calculateRemaining,
+  checkEyeLensAvailability,
+  collectPickupReminders,
   formatEgyptianWhatsAppPhone,
+  formatFirebaseAuthError,
   getPickupUrgency,
+  inferExpectedPolarity,
   normalizeCustomerRecord,
+  normalizeLensPowerValue,
+  parseLensInventoryBackupJson,
   renderWhatsAppMessage,
   sanitizePickupDate,
 } from './optics';
@@ -299,3 +306,140 @@ test('sanitizePickupDate and getPickupUrgency classify overdue, today, soon, upc
   assert.equal(getPickupUrgency('2026-11-28', false, refNow).level, 'soon');
   assert.equal(getPickupUrgency('2026-12-03', false, refNow).level, 'upcoming');
 });
+
+test('formatFirebaseAuthError surfaces clear actionable messages for auth failures', () => {
+  const unauth = formatFirebaseAuthError(
+    { code: 'auth/unauthorized-domain', message: 'Firebase: Error (auth/unauthorized-domain).' },
+    'mido-optics.web.app'
+  );
+  assert.equal(unauth.isUnauthorizedDomain, true);
+  assert.equal(unauth.hostname, 'mido-optics.web.app');
+  assert.match(unauth.details, /mido-optics\.web\.app/);
+
+  const blocked = formatFirebaseAuthError({ code: 'auth/popup-blocked' });
+  assert.equal(blocked.isUnauthorizedDomain, false);
+  assert.match(blocked.title, /منع/);
+
+  const notAllowed = formatFirebaseAuthError({ code: 'auth/operation-not-allowed' });
+  assert.match(notAllowed.details, /Sign-in method/);
+
+  const unknown = formatFirebaseAuthError({ code: 'auth/internal-error' });
+  assert.match(unknown.details, /auth\/internal-error/);
+});
+
+test('collectPickupReminders groups overdue and due-today active orders accurately', () => {
+  const refNow = new Date(2026, 10, 26, 10, 0, 0); // 2026-11-26
+  const base: Omit<CustomerRecord, 'id' | 'name' | 'pickupDate' | 'delivered'> = {
+    date: '2026-11-20T10:00:00Z',
+    phone: '010',
+    frame: 'Frame',
+    lens: 'Lens',
+    total: 1000,
+    paid: 500,
+    photo: '',
+    r: ['-1.00', '-', '-'],
+    l: ['-1.00', '-', '-'],
+    status: 2,
+    hist: [1],
+    tok: 'tok1234567',
+  };
+  const list: CustomerRecord[] = [
+    { ...base, id: 'c1', name: 'متأخر', pickupDate: '2026-11-24', delivered: false },
+    { ...base, id: 'c2', name: 'اليوم', pickupDate: '2026-11-26', delivered: false },
+    { ...base, id: 'c3', name: 'مُسلّم', pickupDate: '2026-11-24', delivered: true },
+    { ...base, id: 'c4', name: 'غداً', pickupDate: '2026-11-27', delivered: false },
+  ];
+
+  const summary = collectPickupReminders(list, refNow, 'Mido Optics');
+  assert.equal(summary.overdue.length, 1);
+  assert.equal(summary.today.length, 1);
+  assert.equal(summary.soon.length, 1);
+  assert.equal(summary.totalDueCount, 2);
+  assert.match(summary.body, /متأخر/);
+  assert.match(summary.body, /اليوم/);
+  assert.equal(summary.signature, '2026-11-26|o:c1|t:c2');
+});
+
+test('normalizeLensPowerValue, parseLensInventoryBackupJson, and checkEyeLensAvailability match R/L stock accurately', () => {
+  assert.equal(normalizeLensPowerValue('-١٫٢٥').magnitudeKey, '1.25');
+  assert.equal(normalizeLensPowerValue('-١٫٢٥').sign, '-');
+  assert.equal(normalizeLensPowerValue('0.00').magnitudeKey, 'plano');
+  assert.equal(inferExpectedPolarity('+', '-'), 'mix');
+  assert.equal(inferExpectedPolarity('-', '0'), 'minus');
+  assert.equal(inferExpectedPolarity('+', '+'), 'plus');
+
+  const backupJson = JSON.stringify({
+    sheets: {
+      minus: {
+        name: '(-) B-N',
+        rows: ['plano', '1.25', '2.00'],
+        cols: ['plano', '0.50'],
+        q: {
+          '1.25|0.50': 5,
+          '2.00|plano': 1,
+        },
+      },
+      plus: {
+        name: '(+) B-N',
+        rows: ['plano', '1.50', '2.00'],
+        cols: ['plano', '0.50', '0.75'],
+        q: {
+          '1.50|0.50': 4,
+          '2.00|0.75': 3,
+        },
+      },
+      mix: {
+        name: 'Mix',
+        rows: ['plano', '1.00'],
+        cols: ['plano', '0.75'],
+        q: {
+          '1.00|0.75': 6,
+        },
+      },
+    },
+    sheetOrder: ['minus', 'plus', 'mix'],
+    lowThresholds: { minus: 2, plus: 2, mix: 2 },
+    _t: 1700000000000,
+  });
+
+  const inventory = parseLensInventoryBackupJson(backupJson);
+
+  const inStockMinus = checkEyeLensAvailability('R', ['-1.25', '-0.50', '90'], inventory);
+  assert.equal(inStockMinus.status, 'in-stock');
+  assert.equal(inStockMinus.qty, 5);
+  assert.equal(inStockMinus.sheetName, '(-) B-N');
+
+  const lowStockMinus = checkEyeLensAvailability('L', ['-2.00', '-', '-'], inventory);
+  assert.equal(lowStockMinus.status, 'low-stock');
+  assert.equal(lowStockMinus.qty, 1);
+
+  const inStockMix = checkEyeLensAvailability('R', ['+1.00', '-0.75', '180'], inventory);
+  assert.equal(inStockMix.status, 'in-stock');
+  assert.equal(inStockMix.sheetName, 'Mix');
+
+  // +2.00 / -0.50 is not in mix, but transposed (+1.50 / +0.50) IS in plus!
+  const transposedPlus = checkEyeLensAvailability('L', ['+2.00', '-0.50', '90'], inventory);
+  assert.equal(transposedPlus.status, 'in-stock');
+  assert.equal(transposedPlus.transposed, true);
+  assert.equal(transposedPlus.sheetName, '(+) B-N');
+
+  const missing = checkEyeLensAvailability('R', ['-5.75', '-1.25', '10'], inventory);
+  assert.equal(missing.status, 'order-needed');
+  assert.match(missing.message, /اطلبها من الشركة/);
+});
+
+test('buildSinglePagePdfFromJpeg outputs valid PDF 1.4 structure with XRef offsets', () => {
+  const fakeJpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0xff, 0xd9]);
+  const pdf = buildSinglePagePdfFromJpeg({
+    jpegBytes: fakeJpeg,
+    imageWidth: 1240,
+    imageHeight: 1754,
+  });
+  const text = new TextDecoder('latin1').decode(pdf);
+  assert.ok(text.startsWith('%PDF-1.4\n'));
+  assert.ok(text.includes('/Subtype /Image'));
+  assert.ok(text.includes('/Filter /DCTDecode'));
+  assert.ok(text.includes('xref\n0 6\n'));
+  assert.ok(text.trimEnd().endsWith('%%EOF'));
+});
+

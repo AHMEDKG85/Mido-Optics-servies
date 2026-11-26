@@ -170,7 +170,19 @@ export function useOpticsStore() {
       const trackRef = doc(db, 'track', tok);
       const batch = writeBatch(db);
 
-      const existsOnServer = knownServerCustomerIds.current.has(id);
+      let existsOnServer = knownServerCustomerIds.current.has(id);
+      if (!existsOnServer) {
+        try {
+          const existingCustSnap = await getDoc(customerRef);
+          existsOnServer = existingCustSnap.exists();
+          if (existsOnServer) {
+            knownServerCustomerIds.current.add(id);
+          }
+        } catch {
+          existsOnServer = false;
+        }
+      }
+
       const safeTotal = clampNumber(record.total);
       const safePaid = clampNumber(record.paid);
       const safePhoto =
@@ -180,7 +192,18 @@ export function useOpticsStore() {
       const safeR = sanitizeEyeTuple(record.r);
       const safeL = sanitizeEyeTuple(record.l);
       const safeStatus = Math.max(0, Math.min(4, Math.trunc(record.status || 0)));
-      const safeHist = Array.isArray(record.hist) ? record.hist.slice(0, 5) : [Date.now()];
+      const rawHist = Array.isArray(record.hist) ? record.hist.slice(0, 5) : [Date.now()];
+      const safeHist = rawHist.map((item, idx) => {
+        if (typeof item === 'number' && Number.isFinite(item) && item >= 0) {
+          return Math.trunc(item);
+        }
+        return idx === 0 ? Date.now() : null;
+      });
+      if (safeHist.length === 0) {
+        safeHist.push(Date.now());
+      }
+      const rawDate = String(record.date || '').trim().slice(0, 40);
+      const safeDate = rawDate.length >= 10 ? rawDate : new Date().toISOString();
       const safeName = record.name.trim().slice(0, 120) || 'عميل';
       const safePhone = (record.phone || '').trim().slice(0, 30);
       const safeFrame = (record.frame || '').trim().slice(0, 120);
@@ -209,7 +232,7 @@ export function useOpticsStore() {
         batch.set(customerRef, {
           id,
           ownerId: uid,
-          date: record.date.slice(0, 40),
+          date: safeDate,
           name: safeName,
           phone: safePhone,
           frame: safeFrame,
@@ -230,13 +253,11 @@ export function useOpticsStore() {
       }
 
       let trackExists = existsOnServer;
-      if (existsOnServer) {
-        try {
-          const trackSnap = await getDoc(trackRef);
-          trackExists = trackSnap.exists();
-        } catch {
-          trackExists = existsOnServer;
-        }
+      try {
+        const trackSnap = await getDoc(trackRef);
+        trackExists = trackSnap.exists();
+      } catch {
+        trackExists = existsOnServer;
       }
 
       if (trackExists) {
@@ -426,7 +447,11 @@ export function useOpticsStore() {
       },
       (err) => {
         setSyncError(err.message);
-        handleFirestoreError(err, OperationType.LIST, 'customers');
+        try {
+          handleFirestoreError(err, OperationType.LIST, 'customers');
+        } catch {
+          // Structured error logged in handleFirestoreError; keep app running offline-first
+        }
       }
     );
 
@@ -445,7 +470,12 @@ export function useOpticsStore() {
         }
       },
       (err) => {
-        handleFirestoreError(err, OperationType.GET, `settings/${user.uid}`);
+        setSyncError(err.message);
+        try {
+          handleFirestoreError(err, OperationType.GET, `settings/${user.uid}`);
+        } catch {
+          // Structured error logged in handleFirestoreError; keep app running offline-first
+        }
       }
     );
 
@@ -686,6 +716,7 @@ export function useOpticsStore() {
     authReady,
     isOnline,
     syncState,
+    syncError,
     pendingCount: pendingOps.length,
     firestorePendingWrites,
     customers,
