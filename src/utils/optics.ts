@@ -11,6 +11,7 @@ import {
   PriceItemCategory,
   REPAIR_STAGES,
   RepairRecord,
+  USAGE_TYPE_LABELS,
   UsageType,
 } from '../types/optics';
 
@@ -1091,6 +1092,67 @@ export function checkEyeLensAvailability(
     threshold: 2,
     message: 'غير متوفر في المخزن — اطلبها من الشركة',
   };
+}
+
+export function buildReceiptImageFilename(
+  kind: 'customer' | 'repair',
+  name: string,
+  id: string
+): string {
+  const safeName =
+    String(name || '')
+      .trim()
+      .replace(/[^\w\u0600-\u06FF-]+/g, '_')
+      .replace(/^_+|_+$/g, '') || 'customer';
+  const suffix = String(id || '').slice(-5) || '00000';
+  const prefix = kind === 'repair' ? 'repair-receipt' : 'receipt';
+  return `${prefix}-${safeName}-${suffix}.png`;
+}
+
+export function buildReceiptShareSummary(params: {
+  customer?: CustomerRecord | null;
+  repair?: RepairRecord | null;
+  shopName?: string;
+  trackingUrl: string;
+}): string {
+  const { customer, repair, shopName = 'Mido Optics', trackingUrl } = params;
+  if (repair) {
+    const invoiceNumber = `REP-${repair.id.slice(-8).toUpperCase()}`;
+    const rest = calculateRemaining(repair.cost, repair.paid);
+    return [
+      `إيصال تصليح من ${shopName} (${invoiceNumber})`,
+      `العميل: ${repair.name}`,
+      repair.glassesType ? `نوع النظارة: ${repair.glassesType}` : '',
+      repair.weldingType ? `نوع اللحام: ${repair.weldingType}` : '',
+      repair.representativeName ? `اسم المندوب: ${repair.representativeName}` : '',
+      `التكلفة: ${repair.cost} جنيه | المدفوع: ${repair.paid} جنيه | المتبقي: ${
+        rest > 0 ? `${rest} جنيه` : 'خالص'
+      }`,
+      `متابعة التصليح: ${trackingUrl}`,
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  if (customer) {
+    const invoiceNumber = `INV-${customer.id.slice(-8).toUpperCase()}`;
+    const rest = calculateRemaining(customer.total, customer.paid);
+    const details = [customer.frame, customer.lens].filter(Boolean).join(' · ');
+    return [
+      `فاتورة من ${shopName} (${invoiceNumber})`,
+      `العميل: ${customer.name}`,
+      customer.usageType ? `الاستخدام: ${USAGE_TYPE_LABELS[customer.usageType]}` : '',
+      details ? `الطلب: ${details}` : '',
+      `الإجمالي: ${customer.total} جنيه | المدفوع: ${customer.paid} جنيه | المتبقي: ${
+        rest > 0 ? `${rest} جنيه` : 'خالص'
+      }`,
+      `متابعة الطلب: ${trackingUrl}`,
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  return `رابط المتابعة:\n${trackingUrl}`;
 }
 
 export function buildSinglePagePdfFromJpeg(params: {

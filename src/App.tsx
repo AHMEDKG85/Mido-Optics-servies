@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Copy, MessageCircle, MessageSquare } from 'lucide-react';
+import { Copy, MessageCircle, MessageSquare, Printer, Share2 } from 'lucide-react';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Header } from './components/Header';
 import { SyncToolbar } from './components/SyncToolbar';
@@ -34,6 +34,13 @@ import {
   buildTrackingUrl,
   formatFirebaseAuthError,
 } from './utils/optics';
+import {
+  copyReceiptImageToClipboard,
+  generateReceiptImageAsset,
+  shareReceiptImageWithLink,
+  ThermalRollWidth,
+  triggerImageDownload,
+} from './utils/receiptImage';
 
 function parseHashRoute(hash: string): { page: AppPage; trackToken: string | null } {
   const clean = hash.replace(/^#/, '');
@@ -148,8 +155,19 @@ function MidoOpticsApp() {
     onNavigateToOrders: () => navigate('orders'),
   });
 
+  const getPreferredRollWidth = (): ThermalRollWidth => {
+    try {
+      return localStorage.getItem('mido_thermal_width') === '58mm' ? '58mm' : '80mm';
+    } catch {
+      return '80mm';
+    }
+  };
+
   const prepareWhatsAppDispatch = useCallback(
-    (record: CustomerRecord, options?: { readyPickup?: boolean }) => {
+    (
+      record: CustomerRecord,
+      options?: { readyPickup?: boolean; autoDownloadImage?: boolean; copyImage?: boolean }
+    ) => {
       const origin = window.location.origin;
       const pathname = window.location.pathname;
       const trackingUrl = buildTrackingUrl(
@@ -166,6 +184,7 @@ function MidoOpticsApp() {
         forceReadyMessage: options?.readyPickup,
       });
 
+      const triggeredAt = Date.now();
       setPendingDispatch({
         customer: record,
         trackingUrl,
@@ -173,8 +192,37 @@ function MidoOpticsApp() {
         smsUrl: dispatch.smsUrl,
         message: dispatch.message,
         isReadyNotification: dispatch.isReadyNotification,
-        triggeredAt: Date.now(),
+        triggeredAt,
       });
+
+      void generateReceiptImageAsset({
+        customer: record,
+        shopName: store.settings.shopName || 'Mido Optics',
+        trackingUrl,
+        rollWidth: getPreferredRollWidth(),
+      })
+        .then((asset) => {
+          setPendingDispatch((prev) =>
+            prev && prev.triggeredAt === triggeredAt
+              ? {
+                  ...prev,
+                  receiptImageUrl: asset.dataUrl,
+                  receiptImageFile: asset.file,
+                  receiptImageBlob: asset.blob,
+                  receiptFilename: asset.filename,
+                }
+              : prev
+          );
+          if (options?.autoDownloadImage) {
+            triggerImageDownload(asset.file, asset.filename);
+          }
+          if (options?.copyImage || options?.autoDownloadImage) {
+            void copyReceiptImageToClipboard(asset.blob);
+          }
+        })
+        .catch(() => {
+          // ignore silent background canvas fallback errors
+        });
 
       return dispatch;
     },
@@ -182,7 +230,10 @@ function MidoOpticsApp() {
   );
 
   const prepareRepairWhatsAppDispatch = useCallback(
-    (record: RepairRecord, options?: { readyPickup?: boolean }) => {
+    (
+      record: RepairRecord,
+      options?: { readyPickup?: boolean; autoDownloadImage?: boolean; copyImage?: boolean }
+    ) => {
       const origin = window.location.origin;
       const pathname = window.location.pathname;
       const trackingUrl = buildRepairTrackingUrl(
@@ -198,6 +249,7 @@ function MidoOpticsApp() {
         forceReadyMessage: options?.readyPickup,
       });
 
+      const triggeredAt = Date.now();
       setPendingRepairDispatch({
         repair: record,
         trackingUrl,
@@ -205,8 +257,37 @@ function MidoOpticsApp() {
         smsUrl: dispatch.smsUrl,
         message: dispatch.message,
         isReadyNotification: dispatch.isReadyNotification,
-        triggeredAt: Date.now(),
+        triggeredAt,
       });
+
+      void generateReceiptImageAsset({
+        repair: record,
+        shopName: store.settings.shopName || 'Mido Optics',
+        trackingUrl,
+        rollWidth: getPreferredRollWidth(),
+      })
+        .then((asset) => {
+          setPendingRepairDispatch((prev) =>
+            prev && prev.triggeredAt === triggeredAt
+              ? {
+                  ...prev,
+                  receiptImageUrl: asset.dataUrl,
+                  receiptImageFile: asset.file,
+                  receiptImageBlob: asset.blob,
+                  receiptFilename: asset.filename,
+                }
+              : prev
+          );
+          if (options?.autoDownloadImage) {
+            triggerImageDownload(asset.file, asset.filename);
+          }
+          if (options?.copyImage || options?.autoDownloadImage) {
+            void copyReceiptImageToClipboard(asset.blob);
+          }
+        })
+        .catch(() => {
+          // ignore silent background canvas fallback errors
+        });
 
       return dispatch;
     },
@@ -230,12 +311,29 @@ function MidoOpticsApp() {
 
     if (isNew) {
       if (store.settings.autoWhatsApp) {
-        prepareWhatsAppDispatch(record);
+        prepareWhatsAppDispatch(record, { autoDownloadImage: true, copyImage: true });
         navigate('orders');
-        showToast('تم حفظ العميل وتجهيز رابط المتابعة للواتساب');
+        showToast('تم حفظ العميل وتنزيل صورة الوصل وتجهيزها للإرسال مع رابط المتابعة');
       } else {
+        const trackingUrl = buildTrackingUrl(
+          window.location.origin,
+          window.location.pathname,
+          record.tok,
+          store.settings.publicBaseUrl
+        );
+        void generateReceiptImageAsset({
+          customer: record,
+          shopName: store.settings.shopName || 'Mido Optics',
+          trackingUrl,
+          rollWidth: getPreferredRollWidth(),
+        })
+          .then((asset) => {
+            triggerImageDownload(asset.file, asset.filename);
+            void copyReceiptImageToClipboard(asset.blob);
+          })
+          .catch(() => {});
         setOrderModalCustomerId(record.id);
-        showToast('تم حفظ العميل بنجاح');
+        showToast('تم حفظ العميل وتنزيل صورة الفاتورة (PNG) على جهازك');
       }
     } else {
       showToast('تم حفظ التعديلات بنجاح');
@@ -249,7 +347,10 @@ function MidoOpticsApp() {
     const isMovingBack = previous ? updated.status < previous.status : false;
 
     if (updated.status === 4) {
-      const dispatch = prepareWhatsAppDispatch(updated, { readyPickup: true });
+      const dispatch = prepareWhatsAppDispatch(updated, {
+        readyPickup: true,
+        copyImage: true,
+      });
       if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
         void navigator.clipboard.writeText(dispatch.message).catch(() => {});
       }
@@ -258,7 +359,7 @@ function MidoOpticsApp() {
     }
 
     if (store.settings.autoWhatsApp) {
-      prepareWhatsAppDispatch(updated);
+      prepareWhatsAppDispatch(updated, { copyImage: true });
       showToast(
         isMovingBack
           ? 'تم الرجوع للمرحلة السابقة وتحديث رسالة المتابعة'
@@ -304,11 +405,28 @@ function MidoOpticsApp() {
 
     if (isNew) {
       if (store.settings.autoWhatsApp) {
-        prepareRepairWhatsAppDispatch(record);
+        prepareRepairWhatsAppDispatch(record, { autoDownloadImage: true, copyImage: true });
         navigate('repair-orders');
-        showToast('تم تسجيل التصليح وتجهيز رسالة المتابعة عبر واتساب');
+        showToast('تم تسجيل التصليح وتنزيل صورة الوصل وتجهيزها للإرسال مع رابط المتابعة');
       } else {
-        showToast('تم تسجيل التصليح بنجاح');
+        const trackingUrl = buildRepairTrackingUrl(
+          window.location.origin,
+          window.location.pathname,
+          record.tok,
+          store.settings.publicBaseUrl
+        );
+        void generateReceiptImageAsset({
+          repair: record,
+          shopName: store.settings.shopName || 'Mido Optics',
+          trackingUrl,
+          rollWidth: getPreferredRollWidth(),
+        })
+          .then((asset) => {
+            triggerImageDownload(asset.file, asset.filename);
+            void copyReceiptImageToClipboard(asset.blob);
+          })
+          .catch(() => {});
+        showToast('تم تسجيل التصليح وتنزيل صورة الوصل (PNG) على جهازك');
       }
     } else {
       showToast('تم تحديث بيانات التصليح بنجاح');
@@ -322,7 +440,10 @@ function MidoOpticsApp() {
     const isMovingBack = previous ? updated.status < previous.status : false;
 
     if (updated.status === 4) {
-      const dispatch = prepareRepairWhatsAppDispatch(updated, { readyPickup: true });
+      const dispatch = prepareRepairWhatsAppDispatch(updated, {
+        readyPickup: true,
+        copyImage: true,
+      });
       if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
         void navigator.clipboard.writeText(dispatch.message).catch(() => {});
       }
@@ -331,7 +452,7 @@ function MidoOpticsApp() {
     }
 
     if (store.settings.autoWhatsApp) {
-      prepareRepairWhatsAppDispatch(updated);
+      prepareRepairWhatsAppDispatch(updated, { copyImage: true });
       showToast(
         isMovingBack
           ? 'تم الرجوع للمرحلة السابقة وتحديث رسالة متابعة التصليح'
@@ -408,7 +529,7 @@ function MidoOpticsApp() {
     : null;
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#f3f9fd] dark:bg-[#0d1722] text-[#1d2733] dark:text-[#eef3f8] pb-20 md:pb-8">
+    <div className="app-print-root min-h-screen flex flex-col bg-[#f3f9fd] dark:bg-[#0d1722] text-[#1d2733] dark:text-[#eef3f8] pb-20 md:pb-8">
       <div className="app-shell-print-hide flex-1 flex flex-col">
         <Header
           activePage={routeState.page}
@@ -470,15 +591,57 @@ function MidoOpticsApp() {
                   </button>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                  {pendingDispatch.receiptImageFile && pendingDispatch.receiptImageBlob && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!pendingDispatch.receiptImageFile || !pendingDispatch.receiptImageBlob) return;
+                        void shareReceiptImageWithLink({
+                          file: pendingDispatch.receiptImageFile,
+                          blob: pendingDispatch.receiptImageBlob,
+                          filename: pendingDispatch.receiptFilename || 'receipt.png',
+                          title: `وصل ${pendingDispatch.customer.name}`,
+                          message: pendingDispatch.message,
+                        }).then((res) => {
+                          if (res === 'shared-file') {
+                            showToast('تم إرسال صورة الوصل مع رابط المتابعة');
+                          } else if (res === 'copied-and-downloaded') {
+                            showToast('تم تنزيل ونسخ صورة الوصل — الصقها في واتساب مع الرابط');
+                          }
+                        });
+                      }}
+                      className="min-h-[42px] px-4 py-2 rounded-xl bg-gradient-to-br from-[#d9b65c] to-[#a8832f] text-white text-xs sm:text-sm font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Share2 className="w-4 h-4" />
+                      <span>إرسال الصورة + الرابط</span>
+                    </button>
+                  )}
                   <a
                     href={pendingDispatch.waUrl}
                     target="_blank"
                     rel="noopener noreferrer"
+                    onClick={() => {
+                      if (!pendingDispatch.receiptImageBlob) return;
+                      void copyReceiptImageToClipboard(pendingDispatch.receiptImageBlob).then((ok) => {
+                        if (ok) showToast('تم نسخ صورة الوصل — الصقها في واتساب مع الرابط');
+                      });
+                    }}
                     className="min-h-[42px] px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-bold inline-flex items-center gap-1.5 transition-colors"
                   >
                     <MessageCircle className="w-4 h-4" />
                     <span>إرسال إشعار واتساب للعميل</span>
                   </a>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setInvoiceRepairId(null);
+                      setInvoiceCustomerId(pendingDispatch.customer.id);
+                    }}
+                    className="min-h-[42px] px-3.5 py-2 rounded-xl bg-white dark:bg-[#15232f] border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Printer className="w-4 h-4 text-[#c9a24b]" />
+                    <span>طباعة كاشير</span>
+                  </button>
                   {pendingDispatch.smsUrl && (
                     <a
                       href={pendingDispatch.smsUrl}
@@ -540,15 +703,64 @@ function MidoOpticsApp() {
                   </button>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                  {pendingRepairDispatch.receiptImageFile && pendingRepairDispatch.receiptImageBlob && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (
+                          !pendingRepairDispatch.receiptImageFile ||
+                          !pendingRepairDispatch.receiptImageBlob
+                        )
+                          return;
+                        void shareReceiptImageWithLink({
+                          file: pendingRepairDispatch.receiptImageFile,
+                          blob: pendingRepairDispatch.receiptImageBlob,
+                          filename:
+                            pendingRepairDispatch.receiptFilename || 'repair-receipt.png',
+                          title: `إيصال تصليح ${pendingRepairDispatch.repair.name}`,
+                          message: pendingRepairDispatch.message,
+                        }).then((res) => {
+                          if (res === 'shared-file') {
+                            showToast('تم إرسال صورة الوصل مع رابط المتابعة');
+                          } else if (res === 'copied-and-downloaded') {
+                            showToast('تم تنزيل ونسخ صورة الوصل — الصقها في واتساب مع الرابط');
+                          }
+                        });
+                      }}
+                      className="min-h-[42px] px-4 py-2 rounded-xl bg-gradient-to-br from-[#d9b65c] to-[#a8832f] text-white text-xs sm:text-sm font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Share2 className="w-4 h-4" />
+                      <span>إرسال الصورة + الرابط</span>
+                    </button>
+                  )}
                   <a
                     href={pendingRepairDispatch.waUrl}
                     target="_blank"
                     rel="noopener noreferrer"
+                    onClick={() => {
+                      if (!pendingRepairDispatch.receiptImageBlob) return;
+                      void copyReceiptImageToClipboard(
+                        pendingRepairDispatch.receiptImageBlob
+                      ).then((ok) => {
+                        if (ok) showToast('تم نسخ صورة الوصل — الصقها في واتساب مع الرابط');
+                      });
+                    }}
                     className="min-h-[42px] px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-bold inline-flex items-center gap-1.5 transition-colors"
                   >
                     <MessageCircle className="w-4 h-4" />
                     <span>إرسال إشعار واتساب للعميل</span>
                   </a>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setInvoiceCustomerId(null);
+                      setInvoiceRepairId(pendingRepairDispatch.repair.id);
+                    }}
+                    className="min-h-[42px] px-3.5 py-2 rounded-xl bg-white dark:bg-[#15232f] border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-100 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Printer className="w-4 h-4 text-[#c9a24b]" />
+                    <span>طباعة كاشير</span>
+                  </button>
                   {pendingRepairDispatch.smsUrl && (
                     <a
                       href={pendingRepairDispatch.smsUrl}

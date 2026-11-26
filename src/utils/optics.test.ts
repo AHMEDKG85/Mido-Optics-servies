@@ -4,6 +4,8 @@ import {
   advanceHist,
   applyCustomerDeliverySettlement,
   applyRepairDeliverySettlement,
+  buildReceiptImageFilename,
+  buildReceiptShareSummary,
   buildRepairStageWhatsAppDispatch,
   buildRepairTrackingUrl,
   buildSinglePagePdfFromJpeg,
@@ -696,6 +698,70 @@ test('buildSinglePagePdfFromJpeg supports 80mm thermal cashier roll format', () 
   const text = new TextDecoder('latin1').decode(pdf);
   assert.ok(text.includes('/MediaBox [0 0 226.77'));
 });
+
+test('buildReceiptImageFilename generates clean PNG filenames for customers and repairs', () => {
+  const custFile = buildReceiptImageFilename('customer', 'أحمد علي', 'cust_98765');
+  assert.equal(custFile, 'receipt-أحمد_علي-98765.png');
+  assert.ok(!custFile.endsWith('.pdf'));
+
+  const repFile = buildReceiptImageFilename('repair', 'كريم', 'rep_12345');
+  assert.equal(repFile, 'repair-receipt-كريم-12345.png');
+});
+
+test('buildReceiptShareSummary includes tracking link and totals for customers and repairs', () => {
+  const custSummary = buildReceiptShareSummary({
+    customer: {
+      id: 'cust_abc12',
+      date: '2026-11-26T10:00:00.000Z',
+      name: 'سارة محمود',
+      phone: '01001122334',
+      frame: 'تيتانيوم',
+      lens: 'بلو كت',
+      total: 1200,
+      paid: 700,
+      photo: '',
+      r: ['-1.50', '-', '-'],
+      l: ['-1.25', '-', '-'],
+      usageType: 'distance',
+      status: 0,
+      hist: [1],
+      tok: 'tok99881',
+      pickupDate: '',
+      delivered: false,
+    },
+    shopName: 'Mido Optics',
+    trackingUrl: 'https://mido-optics.web.app/#track-tok99881',
+  });
+  assert.match(custSummary, /سارة محمود/);
+  assert.match(custSummary, /المتبقي: 500 جنيه/);
+  assert.match(custSummary, /https:\/\/mido-optics\.web\.app\/#track-tok99881/);
+
+  const repSummary = buildReceiptShareSummary({
+    repair: {
+      id: 'rep_xyz99',
+      date: '2026-11-26T10:00:00.000Z',
+      name: 'حسن طارق',
+      phone: '01112233445',
+      glassesType: 'معدن',
+      weldingType: 'ليزر',
+      representativeName: 'يوسف',
+      cost: 200,
+      paid: 200,
+      notes: '',
+      status: 0,
+      hist: [1],
+      tok: 'rtok1122',
+      pickupDate: '',
+      delivered: false,
+    },
+    shopName: 'Mido Optics',
+    trackingUrl: 'https://mido-optics.web.app/#rtrack-rtok1122',
+  });
+  assert.match(repSummary, /حسن طارق/);
+  assert.match(repSummary, /المتبقي: خالص/);
+  assert.match(repSummary, /https:\/\/mido-optics\.web\.app\/#rtrack-rtok1122/);
+});
+
 
 
 

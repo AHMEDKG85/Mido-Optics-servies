@@ -3,6 +3,7 @@ import QRCode from 'qrcode';
 import {
   Download,
   Glasses,
+  Image as ImageIcon,
   MessageCircle,
   Printer,
   Share2,
@@ -18,14 +19,21 @@ import {
   USAGE_TYPE_LABELS,
 } from '../types/optics';
 import {
+  buildReceiptShareSummary,
   buildRepairTrackingUrl,
-  buildSinglePagePdfFromJpeg,
   buildTrackingUrl,
   calculateRemaining,
   formatArabicDateTime,
   formatArabicPickupDate,
   formatEgyptianWhatsAppPhone,
 } from '../utils/optics';
+import {
+  copyReceiptImageToClipboard,
+  generateReceiptImageAsset,
+  shareReceiptImageWithLink,
+  ThermalRollWidth,
+  triggerImageDownload,
+} from '../utils/receiptImage';
 
 interface InvoiceModalProps {
   customer?: CustomerRecord | null;
@@ -35,210 +43,14 @@ interface InvoiceModalProps {
   onToast: (msg: string) => void;
 }
 
-async function renderThermalReceiptCanvas(params: {
-  customer?: CustomerRecord | null;
-  repair?: RepairRecord | null;
-  shopName: string;
-  qrCanvas: HTMLCanvasElement | null;
-}): Promise<HTMLCanvasElement> {
-  const { customer, repair, shopName, qrCanvas } = params;
-  const width = 576; // 80mm thermal roll width (~203dpi)
-  const height = customer ? 1060 : 940;
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  canvas.dir = 'rtl';
-  const ctx = canvas.getContext('2d');
-  if (!ctx) {
-    throw new Error('تعذر إنشاء الإيصال');
+function getInitialRollWidth(): ThermalRollWidth {
+  try {
+    const saved = localStorage.getItem('mido_thermal_width');
+    if (saved === '58mm' || saved === '80mm') return saved;
+  } catch {
+    // ignore storage access errors
   }
-
-  // Crisp thermal white background
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, width, height);
-
-  const pad = 26;
-  const innerW = width - pad * 2;
-  let y = 36;
-
-  const drawDashedLine = (lineY: number) => {
-    ctx.save();
-    ctx.strokeStyle = '#64748b';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([7, 6]);
-    ctx.beginPath();
-    ctx.moveTo(pad, lineY);
-    ctx.lineTo(width - pad, lineY);
-    ctx.stroke();
-    ctx.restore();
-  };
-
-  // Shop header
-  ctx.direction = 'rtl';
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 34px "Cairo", "Segoe UI", Tahoma, sans-serif';
-  ctx.fillText(shopName || 'Mido Optics', width / 2, y);
-
-  y += 32;
-  ctx.fillStyle = '#334155';
-  ctx.font = 'bold 20px "Cairo", "Segoe UI", Tahoma, sans-serif';
-  ctx.fillText(repair ? 'إيصال استلام تصليح نظارة' : 'إيصال طلب نظارة طبية', width / 2, y);
-
-  y += 26;
-  const code = repair
-    ? `REP-${repair.id.slice(-8).toUpperCase()}`
-    : `INV-${(customer?.id || '').slice(-8).toUpperCase()}`;
-  const dateText = formatArabicDateTime(repair ? repair.date : customer?.date) || '';
-  ctx.fillStyle = '#475569';
-  ctx.font = 'bold 17px monospace';
-  ctx.fillText(`${code}  |  ${dateText}`, width / 2, y);
-
-  y += 22;
-  drawDashedLine(y);
-
-  const drawKeyValueRow = (label: string, value: string, bold = false) => {
-    y += 30;
-    ctx.direction = 'rtl';
-    ctx.textAlign = 'right';
-    ctx.fillStyle = '#475569';
-    ctx.font = '600 18px "Cairo", "Segoe UI", Tahoma, sans-serif';
-    ctx.fillText(label, width - pad, y);
-
-    ctx.textAlign = 'left';
-    ctx.fillStyle = '#0f172a';
-    ctx.font = `${bold ? 'bold' : '600'} 18px "Cairo", "Segoe UI", Tahoma, sans-serif`;
-    ctx.fillText(value.slice(0, 32), pad, y);
-  };
-
-  if (repair) {
-    const stageText = repair.delivered
-      ? 'تم التسليم للعميل'
-      : REPAIR_STAGES[Math.max(0, Math.min(4, repair.status || 0))];
-    drawKeyValueRow('اسم العميل:', repair.name, true);
-    drawKeyValueRow('واتساب:', repair.phone || 'غير مسجل');
-    drawKeyValueRow('نوع النظارة:', repair.glassesType || '—');
-    drawKeyValueRow('نوع اللحام:', repair.weldingType || '—');
-    drawKeyValueRow('اسم المندوب:', repair.representativeName || '—');
-    drawKeyValueRow('حالة التصليح:', stageText);
-    if (repair.notes) {
-      drawKeyValueRow('ملاحظات:', repair.notes);
-    }
-
-    y += 22;
-    drawDashedLine(y);
-
-    const rest = calculateRemaining(repair.cost, repair.paid);
-    drawKeyValueRow('تكلفة التصليح:', `${repair.cost} ج`, true);
-    drawKeyValueRow('المدفوع:', `${repair.paid} ج`);
-    drawKeyValueRow('الباقي:', rest > 0 ? `${rest} ج` : 'خالص (0 ج)', true);
-  } else if (customer) {
-    const stageText = customer.delivered
-      ? 'تم التسليم للعميل'
-      : ORDER_STAGES[Math.max(0, Math.min(4, customer.status || 0))];
-    const usageLabel = customer.usageType ? USAGE_TYPE_LABELS[customer.usageType] : '';
-
-    drawKeyValueRow('اسم العميل:', customer.name, true);
-    drawKeyValueRow('الهاتف:', customer.phone || 'غير مسجل');
-    if (usageLabel) {
-      drawKeyValueRow('نوع الاستخدام:', usageLabel, true);
-    }
-    drawKeyValueRow('الشمبر:', customer.frame || '—');
-    drawKeyValueRow('العدسات:', customer.lens || '—');
-    if (customer.pickupDate) {
-      drawKeyValueRow('موعد الاستلام:', formatArabicPickupDate(customer.pickupDate));
-    }
-    drawKeyValueRow('الحالة:', stageText);
-
-    y += 22;
-    drawDashedLine(y);
-
-    // Eye table
-    y += 28;
-    ctx.direction = 'rtl';
-    ctx.textAlign = 'center';
-    ctx.fillStyle = '#0f172a';
-    ctx.font = 'bold 18px "Cairo", "Segoe UI", Tahoma, sans-serif';
-    ctx.fillText('مقاس النظر (R / L)', width / 2, y);
-
-    y += 14;
-    const colW = innerW / 4;
-    const rowH = 38;
-    ctx.strokeStyle = '#334155';
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(pad, y, innerW, rowH * 3);
-
-    ctx.fillStyle = '#f1f5f9';
-    ctx.fillRect(pad + 1, y + 1, innerW - 2, rowH - 1);
-
-    ctx.direction = 'ltr';
-    ctx.fillStyle = '#0f172a';
-    ctx.font = 'bold 16px monospace';
-    ['EYE', 'SPH', 'CYL', 'AXIS'].forEach((h, i) => {
-      ctx.fillText(h, pad + colW * i + colW / 2, y + 25);
-    });
-
-    [
-      ['R', customer.r],
-      ['L', customer.l],
-    ].forEach(([lbl, vals], rIdx) => {
-      const ry = y + rowH * (rIdx + 1);
-      ctx.beginPath();
-      ctx.moveTo(pad, ry);
-      ctx.lineTo(pad + innerW, ry);
-      ctx.stroke();
-
-      ctx.font = 'bold 17px monospace';
-      ctx.fillText(String(lbl), pad + colW / 2, ry + 25);
-      (vals as string[]).forEach((v, cIdx) => {
-        ctx.font = '600 17px monospace';
-        ctx.fillText(v || '-', pad + colW * (cIdx + 1) + colW / 2, ry + 25);
-      });
-    });
-
-    y += rowH * 3;
-    if (customer.add) {
-      y += 28;
-      ctx.direction = 'ltr';
-      ctx.textAlign = 'center';
-      ctx.fillStyle = '#0f172a';
-      ctx.font = 'bold 17px monospace';
-      ctx.fillText(`ADD (L): ${customer.add}`, width / 2, y);
-    }
-
-    y += 22;
-    drawDashedLine(y);
-
-    const rest = calculateRemaining(customer.total, customer.paid);
-    drawKeyValueRow('المبلغ الكلي:', `${customer.total} ج`, true);
-    drawKeyValueRow('المدفوع:', `${customer.paid} ج`);
-    drawKeyValueRow('الباقي:', rest > 0 ? `${rest} ج` : 'خالص (0 ج)', true);
-  }
-
-  y += 24;
-  drawDashedLine(y);
-
-  // QR + Footer
-  y += 20;
-  if (qrCanvas) {
-    const qrSize = 136;
-    ctx.drawImage(qrCanvas, (width - qrSize) / 2, y, qrSize, qrSize);
-    y += qrSize + 24;
-  } else {
-    y += 28;
-  }
-
-  ctx.direction = 'rtl';
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 18px "Cairo", "Segoe UI", Tahoma, sans-serif';
-  ctx.fillText('امسح الكود لمتابعة الحالة خطوة بخطوة', width / 2, y);
-  y += 26;
-  ctx.fillStyle = '#475569';
-  ctx.font = '500 16px "Cairo", "Segoe UI", Tahoma, sans-serif';
-  ctx.fillText(`شكراً لتعاملكم مع ${shopName || 'Mido Optics'}`, width / 2, y);
-
-  return canvas;
+  return '80mm';
 }
 
 export const InvoiceModal: React.FC<InvoiceModalProps> = ({
@@ -249,7 +61,8 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
   onToast,
 }) => {
   const qrCanvasRef = useRef<HTMLCanvasElement>(null);
-  const [busyPdf, setBusyPdf] = useState(false);
+  const [busyImage, setBusyImage] = useState(false);
+  const [rollWidth, setRollWidth] = useState<ThermalRollWidth>(getInitialRollWidth);
 
   const activeRecord = repair || customer || null;
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
@@ -263,19 +76,30 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
   useEffect(() => {
     if (!activeRecord || !qrCanvasRef.current) return;
     void QRCode.toCanvas(qrCanvasRef.current, trackingUrl, {
-      width: 112,
+      width: rollWidth === '58mm' ? 96 : 114,
       margin: 1,
-      color: { dark: '#0f172a', light: '#ffffff' },
+      color: { dark: '#000000', light: '#ffffff' },
     });
-  }, [activeRecord, trackingUrl]);
+  }, [activeRecord, trackingUrl, rollWidth]);
 
   useEffect(() => {
     if (!activeRecord) return;
     document.body.classList.add('printing-invoice');
     return () => {
       document.body.classList.remove('printing-invoice');
+      document.body.classList.remove('thermal-58mm');
     };
   }, [activeRecord]);
+
+  useEffect(() => {
+    if (!activeRecord) return;
+    document.body.classList.toggle('thermal-58mm', rollWidth === '58mm');
+    try {
+      localStorage.setItem('mido_thermal_width', rollWidth);
+    } catch {
+      // ignore storage errors
+    }
+  }, [activeRecord, rollWidth]);
 
   if (!activeRecord) return null;
 
@@ -295,31 +119,14 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
     ? 'تم التسليم للعميل'
     : ORDER_STAGES[Math.max(0, Math.min(4, customer?.status || 0))];
 
-  const createPdfFile = async (): Promise<File> => {
-    const canvas = await renderThermalReceiptCanvas({
+  const createImageAsset = async () => {
+    return generateReceiptImageAsset({
       customer,
       repair,
       shopName,
+      trackingUrl,
       qrCanvas: qrCanvasRef.current,
-    });
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
-    const base64 = dataUrl.split(',')[1] || '';
-    const binary = atob(base64);
-    const jpegBytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      jpegBytes[i] = binary.charCodeAt(i);
-    }
-    const pdfBytes = buildSinglePagePdfFromJpeg({
-      jpegBytes,
-      imageWidth: canvas.width,
-      imageHeight: canvas.height,
-      paperFormat: 'thermal-80mm',
-    });
-    const safeName = (activeRecord.name || 'customer').replace(/[^\w\u0600-\u06FF-]+/g, '_');
-    const prefix = repair ? 'repair-receipt' : 'receipt';
-    const blob = new Blob([pdfBytes.buffer as ArrayBuffer], { type: 'application/pdf' });
-    return new File([blob], `${prefix}-${safeName}-${activeRecord.id.slice(-5)}.pdf`, {
-      type: 'application/pdf',
+      rollWidth,
     });
   };
 
@@ -327,125 +134,72 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
     window.print();
   };
 
-  const handleDownloadPdf = async () => {
-    setBusyPdf(true);
+  const handleDownloadImage = async () => {
+    setBusyImage(true);
     try {
-      const pdfFile = await createPdfFile();
-      const url = URL.createObjectURL(pdfFile);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = pdfFile.name;
-      a.click();
-      URL.revokeObjectURL(url);
-      onToast('تم تنزيل إيصال الكاشير بصيغة PDF');
+      const asset = await createImageAsset();
+      triggerImageDownload(asset.file, asset.filename);
+      onToast('تم تنزيل صورة فاتورة الكاشير (PNG) على جهازك');
     } catch {
-      onToast('تعذر توليد ملف PDF، يمكنك استخدام زر الطباعة');
+      onToast('تعذر حفظ صورة الفاتورة، يمكنك استخدام زر الطباعة');
     } finally {
-      setBusyPdf(false);
+      setBusyImage(false);
     }
   };
 
-  const handleSharePdf = async () => {
-    setBusyPdf(true);
+  const handleShareImage = async () => {
+    setBusyImage(true);
     try {
-      const pdfFile = await createPdfFile();
-      const textSummary = repair
-        ? [
-            `إيصال تصليح ${shopName} (${invoiceNumber})`,
-            `العميل: ${repair.name}`,
-            `النظارة: ${repair.glassesType || '—'} · اللحام: ${repair.weldingType || '—'}`,
-            repair.representativeName ? `المندوب: ${repair.representativeName}` : '',
-            `التكلفة: ${repair.cost} ج | المدفوع: ${repair.paid} ج | المتبقي: ${rest > 0 ? `${rest} ج` : 'خالص'}`,
-            `رابط المتابعة: ${trackingUrl}`,
-          ]
-            .filter(Boolean)
-            .join('\n')
-        : [
-            `فاتورة ${shopName} (${invoiceNumber})`,
-            `العميل: ${customer?.name}`,
-            `الطلب: ${[customer?.frame, customer?.lens].filter(Boolean).join(' · ') || 'نظارة طبية'}`,
-            `الإجمالي: ${totalAmount} ج | المدفوع: ${paidAmount} ج | المتبقي: ${rest > 0 ? `${rest} ج` : 'خالص'}`,
-            `رابط المتابعة: ${trackingUrl}`,
-          ].join('\n');
+      const asset = await createImageAsset();
+      const textSummary = buildReceiptShareSummary({
+        customer,
+        repair,
+        shopName,
+        trackingUrl,
+      });
 
-      if (
-        typeof navigator !== 'undefined' &&
-        typeof navigator.share === 'function'
-      ) {
-        const canShareFiles =
-          typeof navigator.canShare === 'function' &&
-          navigator.canShare({ files: [pdfFile] });
+      const result = await shareReceiptImageWithLink({
+        file: asset.file,
+        blob: asset.blob,
+        filename: asset.filename,
+        title: `إيصال ${activeRecord.name} — ${shopName}`,
+        message: textSummary,
+      });
 
-        if (canShareFiles) {
-          await navigator.share({
-            title: `إيصال ${activeRecord.name} — ${shopName}`,
-            text: textSummary,
-            files: [pdfFile],
-          });
-          onToast('تمت مشاركة الإيصال PDF');
-          return;
-        }
-
-        await navigator.share({
-          title: `إيصال ${activeRecord.name} — ${shopName}`,
-          text: textSummary,
-        });
-        onToast('تمت مشاركة تفاصيل الإيصال');
-        return;
+      if (result === 'shared-file') {
+        onToast('تمت مشاركة صورة الوصل مع رابط المتابعة');
+      } else if (result === 'copied-and-downloaded') {
+        onToast('تم تنزيل صورة الوصل ونسخها — الصقها في واتساب مع رابط المتابعة');
       }
-
-      const url = URL.createObjectURL(pdfFile);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = pdfFile.name;
-      a.click();
-      URL.revokeObjectURL(url);
-      try {
-        await navigator.clipboard.writeText(textSummary);
-      } catch {
-        // ignore clipboard denial
-      }
-      onToast('تم تنزيل الإيصال PDF ونسخ ملخصه للمشاركة');
-    } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') return;
-      onToast('تعذر المشاركة التلقائية، استخدم زر تنزيل PDF');
+    } catch {
+      onToast('تعذر مشاركة صورة الوصل، تم تنزيل الصورة على جهازك');
     } finally {
-      setBusyPdf(false);
+      setBusyImage(false);
     }
   };
 
-  const waInvoiceText = encodeURIComponent(
-    repair
-      ? [
-          `إيصال تصليح من ${shopName} (${invoiceNumber})`,
-          `العميل: ${repair.name}`,
-          repair.glassesType ? `نوع النظارة: ${repair.glassesType}` : '',
-          repair.weldingType ? `نوع اللحام: ${repair.weldingType}` : '',
-          repair.representativeName ? `اسم المندوب: ${repair.representativeName}` : '',
-          `تكلفة التصليح: ${repair.cost} جنيه`,
-          `المدفوع: ${repair.paid} جنيه`,
-          `الباقي: ${rest > 0 ? `${rest} جنيه` : 'خالص'}`,
-          `متابعة التصليح: ${trackingUrl}`,
-        ]
-          .filter(Boolean)
-          .join('\n')
-      : [
-          `فاتورة من ${shopName} (${invoiceNumber})`,
-          `العميل: ${customer?.name}`,
-          customer?.usageType ? `الاستخدام: ${USAGE_TYPE_LABELS[customer.usageType]}` : '',
-          customer?.frame ? `الشمبر: ${customer.frame}` : '',
-          customer?.lens ? `العدسات: ${customer.lens}` : '',
-          `المبلغ الكلي: ${totalAmount} جنيه`,
-          `المدفوع: ${paidAmount} جنيه`,
-          `المبلغ المتبقي: ${rest > 0 ? `${rest} جنيه` : 'خالص'}`,
-          customer?.pickupDate
-            ? `موعد الاستلام: ${formatArabicPickupDate(customer.pickupDate)}`
-            : '',
-          `متابعة الطلب: ${trackingUrl}`,
-        ]
-          .filter(Boolean)
-          .join('\n')
-  );
+  const handlePrepareWhatsAppImage = async () => {
+    try {
+      const asset = await createImageAsset();
+      const copied = await copyReceiptImageToClipboard(asset.blob);
+      if (copied) {
+        onToast('تم نسخ صورة الوصل تلقائياً — الصقها (Ctrl+V / لصق) داخل واتساب');
+      } else {
+        triggerImageDownload(asset.file, asset.filename);
+        onToast('تم تنزيل صورة الوصل لإرفاقها في واتساب مع الرابط');
+      }
+    } catch {
+      // ignore fallback errors and still let WhatsApp link open
+    }
+  };
+
+  const shareSummary = buildReceiptShareSummary({
+    customer,
+    repair,
+    shopName,
+    trackingUrl,
+  });
+  const waInvoiceText = encodeURIComponent(shareSummary);
   const waPhone = formatEgyptianWhatsAppPhone(activeRecord.phone);
   const waInvoiceUrl = waPhone
     ? `https://wa.me/${waPhone}?text=${waInvoiceText}`
@@ -459,51 +213,41 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
       className="invoice-print-backdrop fixed inset-0 z-50 flex items-center justify-center bg-slate-950/65 backdrop-blur-sm p-3 sm:p-4"
       onClick={onClose}
     >
+      <style media="print">{`@page { size: ${rollWidth} auto; margin: 1.5mm; }`}</style>
+
       <div
-        className="invoice-print-dialog w-full max-w-xl max-h-[94vh] overflow-y-auto rounded-3xl bg-white dark:bg-[#15232f] border border-slate-200 dark:border-slate-800 shadow-2xl"
+        className="invoice-print-dialog w-full max-w-2xl max-h-[94vh] overflow-y-auto rounded-3xl bg-white dark:bg-[#15232f] border border-slate-200 dark:border-slate-800 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Action Bar (hidden when printing) */}
-        <div className="print:hidden sticky top-0 z-10 bg-white/95 dark:bg-[#15232f]/95 backdrop-blur border-b border-slate-200 dark:border-slate-800 px-4 sm:px-5 py-3 flex flex-wrap items-center justify-between gap-2">
-          <h2 id="invoice-modal-title" className="text-sm sm:text-base font-extrabold">
-            {repair ? 'فاتورة التصليح — ورق كاشير (80mm)' : 'فاتورة العميل — ورق كاشير (80mm)'}
-          </h2>
-          <div className="flex flex-wrap items-center gap-1.5">
-            <button
-              type="button"
-              onClick={handlePrint}
-              className="min-h-[38px] px-3 py-1.5 rounded-xl bg-gradient-to-br from-[#d9b65c] to-[#a8832f] hover:from-[#e3c26e] hover:to-[#977427] text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition-all active:scale-[0.98] cursor-pointer"
-            >
-              <Printer className="w-4 h-4" />
-              <span>طباعة كاشير</span>
-            </button>
-            <button
-              type="button"
-              disabled={busyPdf}
-              onClick={() => void handleDownloadPdf()}
-              className="min-h-[38px] px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#192b3b] hover:border-[#c9a24b] text-slate-800 dark:text-slate-100 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60"
-            >
-              <Download className="w-4 h-4 text-[#c9a24b]" />
-              <span>تنزيل PDF</span>
-            </button>
-            <button
-              type="button"
-              disabled={busyPdf}
-              onClick={() => void handleSharePdf()}
-              className="min-h-[38px] px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#192b3b] hover:border-emerald-500 text-slate-800 dark:text-slate-100 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60"
-            >
-              <Share2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-              <span>مشاركة PDF</span>
-            </button>
-            <a
-              href={waInvoiceUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="min-h-[38px] px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition-colors"
-            >
-              <MessageCircle className="w-4 h-4" />
-              <span>واتساب</span>
-            </a>
+        <div className="print:hidden sticky top-0 z-10 bg-white/95 dark:bg-[#15232f]/95 backdrop-blur border-b border-slate-200 dark:border-slate-800 px-4 sm:px-5 py-3 space-y-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 id="invoice-modal-title" className="text-sm sm:text-base font-extrabold">
+                {repair ? 'إيصال تصليح — ماكينة الكاشير' : 'فاتورة العميل — ماكينة الكاشير'}
+              </h2>
+              <div
+                role="group"
+                aria-label="مقاس ورق الكاشير"
+                className="inline-flex items-center rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-[#0d1722] p-0.5 text-[11px] font-bold"
+              >
+                {(['80mm', '58mm'] as const).map((size) => (
+                  <button
+                    key={size}
+                    type="button"
+                    onClick={() => setRollWidth(size)}
+                    className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
+                      rollWidth === size
+                        ? 'bg-[#c9a24b] text-white'
+                        : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    {size}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <button
               type="button"
               onClick={onClose}
@@ -513,13 +257,60 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({
               <X className="w-4 h-4" />
             </button>
           </div>
+
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={handlePrint}
+              className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-gradient-to-br from-[#d9b65c] to-[#a8832f] hover:from-[#e3c26e] hover:to-[#977427] text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition-all active:scale-[0.98] cursor-pointer"
+            >
+              <Printer className="w-4 h-4" />
+              <span>طباعة كاشير</span>
+            </button>
+            <button
+              type="button"
+              disabled={busyImage}
+              onClick={() => void handleDownloadImage()}
+              className="min-h-[38px] px-3.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#192b3b] hover:border-[#c9a24b] text-slate-800 dark:text-slate-100 text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60"
+            >
+              <Download className="w-4 h-4 text-[#c9a24b]" />
+              <span>تنزيل كصورة (PNG)</span>
+            </button>
+            <button
+              type="button"
+              disabled={busyImage}
+              onClick={() => void handleShareImage()}
+              className="min-h-[38px] px-3.5 py-1.5 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40 hover:border-emerald-500 text-emerald-800 dark:text-emerald-200 text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60"
+            >
+              <Share2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              <span>إرسال الصورة + الرابط</span>
+            </button>
+            <a
+              href={waInvoiceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => void handlePrepareWhatsAppImage()}
+              className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition-colors"
+            >
+              <MessageCircle className="w-4 h-4" />
+              <span>واتساب (صورة + رابط)</span>
+            </a>
+          </div>
+          <p className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+            <ImageIcon className="w-3.5 h-3.5 text-[#c9a24b] shrink-0" />
+            <span>
+              تُحفظ الفاتورة كصورة PNG وتُطبع مباشرة على ورق الكاشير ({rollWidth}) مع كود المتابعة.
+            </span>
+          </p>
         </div>
 
-        {/* 80mm Thermal Cashier Receipt Sheet */}
+        {/* Thermal Cashier Receipt Sheet */}
         <div className="p-4 sm:p-6 bg-slate-100/70 dark:bg-[#0d1722]/60 print:p-0 print:bg-white">
           <article
-            data-receipt-format="thermal-80mm"
-            className="invoice-print-sheet w-full max-w-[340px] mx-auto rounded-xl border border-slate-300 bg-white text-slate-900 shadow-sm px-4 py-4 space-y-3 text-xs leading-snug"
+            data-receipt-format={`thermal-${rollWidth}`}
+            className={`invoice-print-sheet w-full mx-auto rounded-xl border border-slate-300 bg-white text-slate-900 shadow-sm px-4 py-4 space-y-3 leading-snug ${
+              rollWidth === '58mm' ? 'max-w-[260px] text-[11px]' : 'max-w-[340px] text-xs'
+            }`}
           >
             {/* Shop Header */}
             <header className="text-center space-y-1 pb-2.5 border-b border-dashed border-slate-400">

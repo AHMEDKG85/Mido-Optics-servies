@@ -315,7 +315,7 @@ export const CustomersPage: React.FC<CustomersPageProps> = ({
                             type="button"
                             onClick={() => onOpenInvoice(c)}
                             aria-label={`فاتورة ${c.name}`}
-                            title="فاتورة للطباعة / PDF"
+                            title="طباعة كاشير / حفظ صورة الوصل"
                             className="min-h-[36px] min-w-[36px] px-2 rounded-xl border border-slate-200/80 dark:border-slate-700 bg-[#f3f9fd] dark:bg-[#1b3042] text-[#8f6c1e] dark:text-[#e8cf8b] hover:border-[#c9a24b] inline-flex items-center justify-center shadow-xs transition-all active:scale-[0.96] cursor-pointer"
                           >
                             <Printer className="w-4 h-4" />

@@ -289,7 +289,7 @@ export const RepairsPage: React.FC<RepairsPageProps> = ({
                             type="button"
                             onClick={() => onOpenInvoice(r)}
                             aria-label={`فاتورة تصليح ${r.name}`}
-                            title="إيصال كاشير / PDF"
+                            title="طباعة كاشير / حفظ صورة الوصل"
                             className="min-h-[38px] min-w-[38px] px-2 rounded-xl border border-slate-200/80 dark:border-slate-700/80 bg-[#f3f9fd] dark:bg-[#1b3042] text-[#8f6c1e] dark:text-[#e8cf8b] hover:border-[#c9a24b] inline-flex items-center justify-center transition-all active:scale-95 cursor-pointer"
                           >
                             <Printer className="w-4 h-4" />

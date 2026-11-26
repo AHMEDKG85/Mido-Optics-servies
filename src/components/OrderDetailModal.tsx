@@ -378,7 +378,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               className="min-h-[44px] px-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-[#f3f9fd] dark:bg-[#1b3042] text-[#8f6c1e] dark:text-[#e8cf8b] text-sm font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <Printer className="w-4 h-4" />
-              <span>فاتورة / PDF</span>
+              <span>فاتورة وصورة كاشير</span>
             </button>
           </div>
 

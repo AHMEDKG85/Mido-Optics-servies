@@ -58,15 +58,30 @@
 @media print {
   @page {
     size: 80mm auto;
-    margin: 2mm;
+    margin: 1.5mm;
   }
 
-  html, body {
-    width: 80mm !important;
+  :root {
+    --thermal-roll-width: 80mm;
+    --thermal-sheet-width: 76mm;
+  }
+
+  body.thermal-58mm {
+    --thermal-roll-width: 58mm;
+    --thermal-sheet-width: 54mm;
+  }
+
+  html,
+  body,
+  #root {
+    width: var(--thermal-roll-width, 80mm) !important;
+    min-height: 0 !important;
+    height: auto !important;
     background: #ffffff !important;
-    color: #0f172a !important;
+    color: #000000 !important;
     margin: 0 !important;
     padding: 0 !important;
+    overflow: visible !important;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
@@ -75,20 +90,30 @@
     display: none !important;
   }
 
+  body.printing-invoice .app-print-root {
+    min-height: 0 !important;
+    height: auto !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: #ffffff !important;
+  }
+
   body.printing-invoice .invoice-print-backdrop {
     position: static !important;
     inset: auto !important;
     padding: 0 !important;
     margin: 0 !important;
-    background: transparent !important;
+    background: #ffffff !important;
     backdrop-filter: none !important;
     display: block !important;
+    height: auto !important;
   }
 
   body.printing-invoice .invoice-print-dialog {
-    width: 76mm !important;
-    max-width: 76mm !important;
+    width: var(--thermal-sheet-width, 76mm) !important;
+    max-width: var(--thermal-sheet-width, 76mm) !important;
     max-height: none !important;
+    height: auto !important;
     margin: 0 auto !important;
     padding: 0 !important;
     overflow: visible !important;
@@ -99,14 +124,28 @@
   }
 
   body.printing-invoice .invoice-print-sheet {
-    width: 76mm !important;
-    max-width: 76mm !important;
+    width: var(--thermal-sheet-width, 76mm) !important;
+    max-width: var(--thermal-sheet-width, 76mm) !important;
+    margin: 0 !important;
+    padding: 2mm 1.5mm !important;
     border: none !important;
     border-radius: 0 !important;
     box-shadow: none !important;
     background: #ffffff !important;
-    color: #0f172a !important;
+    color: #000000 !important;
     font-size: 11px !important;
+    line-height: 1.35 !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  body.thermal-58mm.printing-invoice .invoice-print-sheet {
+    font-size: 10px !important;
+    padding: 1.5mm 1mm !important;
+  }
+
+  body.printing-invoice .invoice-print-sheet * {
+    color: #000000 !important;
+    border-color: #000000 !important;
   }
 }
-
