@@ -15,6 +15,8 @@ import {
   onSnapshot,
   persistentLocalCache,
   persistentMultipleTabManager,
+  query,
+  where,
 } from 'firebase/firestore';
 import { LensInventorySnapshot, LensSheet } from '../types/optics';
 import { normalizeLensInventorySnapshot } from '../utils/optics';
@@ -116,8 +118,13 @@ export function subscribeToLensInventoryCloud(
     }
   );
 
-  const unsubSheets = onSnapshot(
+  const sheetsQuery = query(
     collection(lensDb, 'inventories', uid, 'sheets'),
+    where('ownerId', '==', uid)
+  );
+
+  const unsubSheets = onSnapshot(
+    sheetsQuery,
     (snap) => {
       hasSheets = true;
       const nextSheets: Record<string, LensSheet> = {};

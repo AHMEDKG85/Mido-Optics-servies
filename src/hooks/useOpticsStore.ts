@@ -602,6 +602,21 @@ export function useOpticsStore() {
     [customers, queueOrSyncUpsert]
   );
 
+  const restoreCustomerOrder = useCallback(
+    (customerId: string): CustomerRecord | null => {
+      const target = customers.find((c) => c.id === customerId);
+      if (!target) return null;
+      const updated: CustomerRecord = {
+        ...target,
+        delivered: false,
+      };
+      setCustomers((prev) => prev.map((c) => (c.id === customerId ? updated : c)));
+      queueOrSyncUpsert(updated);
+      return updated;
+    },
+    [customers, queueOrSyncUpsert]
+  );
+
   const deleteCustomer = useCallback(
     (customerId: string) => {
       const target = customers.find((c) => c.id === customerId);
@@ -724,6 +739,7 @@ export function useOpticsStore() {
     saveCustomer,
     updateOrderStage,
     markCustomerDelivered,
+    restoreCustomerOrder,
     deleteCustomer,
     importCustomers,
     loadSampleData,

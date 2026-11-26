@@ -1,5 +1,5 @@
 import React from 'react';
-import { BarChart3, Crown, Glasses, Plus, Send, Users } from 'lucide-react';
+import { Archive, BarChart3, Crown, Glasses, Plus, Send, Users } from 'lucide-react';
 import { AppPage } from '../types/optics';
 
 interface HeaderProps {
@@ -18,6 +18,7 @@ const NAV_ITEMS: Array<{
   { id: 'customers', label: 'العملاء', shortLabel: 'العملاء', icon: Users },
   { id: 'loyalty', label: 'نظام الولاء', shortLabel: 'الولاء', icon: Crown },
   { id: 'orders', label: 'متابعة وواتساب', shortLabel: 'واتساب', icon: Send },
+  { id: 'archive', label: 'أرشيف الطلبات', shortLabel: 'الأرشيف', icon: Archive },
   { id: 'stats', label: 'الإحصائيات', shortLabel: 'الإحصائيات', icon: BarChart3 },
 ];
 
@@ -93,7 +94,7 @@ export const Header: React.FC<HeaderProps> = ({
         aria-label="التنقل السريع"
         className="md:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-[#101c28]/95 backdrop-blur-md pb-[env(safe-area-inset-bottom,0px)]"
       >
-        <div className="grid grid-cols-4 h-14">
+        <div className="grid grid-cols-5 h-14">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             const isActive = activePage === item.id;

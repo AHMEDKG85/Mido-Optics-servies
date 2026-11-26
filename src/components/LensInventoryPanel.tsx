@@ -211,7 +211,18 @@ export const LensInventoryPanel: React.FC<LensInventoryPanelProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+            {authError?.isUnauthorizedDomain && (
+              <a
+                href={`https://console.firebase.google.com/project/${firebaseProjectId}/authentication/settings`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="min-h-[34px] px-3 py-1 rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 font-bold inline-flex items-center gap-1.5"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>فتح إعدادات Firebase</span>
+              </a>
+            )}
             {authError?.isUnauthorizedDomain && authError.hostname && (
               <button
                 type="button"

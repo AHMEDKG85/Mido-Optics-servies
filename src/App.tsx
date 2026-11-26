@@ -8,6 +8,7 @@ import {
   OrdersWhatsAppPage,
   WhatsAppDispatchItem,
 } from './components/OrdersWhatsAppPage';
+import { ArchivePage } from './components/ArchivePage';
 import { StatsDashboardPage } from './components/StatsDashboardPage';
 import { CustomerFormModal } from './components/CustomerFormModal';
 import { OrderDetailModal } from './components/OrderDetailModal';
@@ -34,6 +35,7 @@ function parseHashRoute(hash: string): { page: AppPage; trackToken: string | nul
   if (
     clean === 'loyalty' ||
     clean === 'orders' ||
+    clean === 'archive' ||
     clean === 'stats' ||
     clean === 'customers'
   ) {
@@ -206,7 +208,13 @@ function MidoOpticsApp() {
     if (pendingDispatch?.customer.id === customerId) {
       setPendingDispatch(null);
     }
-    showToast(`تم تسليم نظارة ${updated.name} وحذفها من صفحة الطلبات مع بقائها في صفحة العملاء`);
+    showToast(`تم تسليم نظارة ${updated.name} ونقلها إلى أرشيف الطلبات مع بقائها في صفحة العملاء`);
+  };
+
+  const handleRestoreOrder = (customerId: string) => {
+    const updated = store.restoreCustomerOrder(customerId);
+    if (!updated) return;
+    showToast(`تم استرجاع طلب ${updated.name} إلى الطلبات النشطة`);
   };
 
   const handleSignIn = async () => {
@@ -335,6 +343,15 @@ function MidoOpticsApp() {
             />
           )}
 
+          {routeState.page === 'archive' && (
+            <ArchivePage
+              customers={store.customers}
+              onRestoreOrder={handleRestoreOrder}
+              onOpenOrderModal={(c) => setOrderModalCustomerId(c.id)}
+              onOpenInvoice={(c) => setInvoiceCustomerId(c.id)}
+            />
+          )}
+
           {routeState.page === 'stats' && (
             <StatsDashboardPage customers={store.customers} />
           )}
@@ -359,6 +376,7 @@ function MidoOpticsApp() {
           onClose={() => setOrderModalCustomerId(null)}
           onSetStage={handleAdvanceStage}
           onMarkDelivered={handleMarkDelivered}
+          onRestoreOrder={handleRestoreOrder}
           onEditCustomer={(c) => {
             setOrderModalCustomerId(null);
             handleOpenEdit(c);
@@ -379,7 +397,7 @@ function MidoOpticsApp() {
         <div
           role="status"
           aria-live="polite"
-          className="print:hidden fixed bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-xl bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 text-xs sm:text-sm font-semibold shadow-lg whitespace-nowrap"
+          className="print:hidden fixed bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 z-50 max-w-[calc(100vw-2rem)] px-4 py-2.5 rounded-xl bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 text-xs sm:text-sm font-semibold shadow-lg text-center leading-snug"
         >
           {toastMsg}
         </div>

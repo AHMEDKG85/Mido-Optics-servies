@@ -6,6 +6,7 @@ import {
   CloudOff,
   Copy,
   Download,
+  ExternalLink,
   LogIn,
   LogOut,
   Moon,
@@ -13,6 +14,7 @@ import {
   Sun,
   X,
 } from 'lucide-react';
+import firebaseConfig from '../../firebase-applet-config.json';
 import { SyncState } from '../types/optics';
 import { AuthErrorSummary } from '../utils/optics';
 import { usePWAInstall } from '../hooks/usePWAInstall';
@@ -222,7 +224,18 @@ export const SyncToolbar: React.FC<SyncToolbarProps> = ({
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                {authError?.isUnauthorizedDomain && (
+                  <a
+                    href={`https://console.firebase.google.com/project/${firebaseConfig.projectId}/authentication/settings`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="min-h-[34px] px-3 py-1 rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 font-bold inline-flex items-center gap-1.5"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>فتح إعدادات Firebase</span>
+                  </a>
+                )}
                 {authError?.isUnauthorizedDomain && authError.hostname && (
                   <button
                     type="button"

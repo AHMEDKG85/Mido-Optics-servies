@@ -10,6 +10,7 @@ import {
   Glasses,
   MessageCircle,
   Printer,
+  RotateCcw,
   X,
 } from 'lucide-react';
 import {
@@ -34,6 +35,7 @@ interface OrderDetailModalProps {
   onClose: () => void;
   onSetStage: (customerId: string, stage: number) => void;
   onMarkDelivered: (customerId: string) => void;
+  onRestoreOrder?: (customerId: string) => void;
   onEditCustomer: (customer: CustomerRecord) => void;
   onOpenInvoice: (customer: CustomerRecord) => void;
   onToast: (msg: string) => void;
@@ -46,6 +48,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   onClose,
   onSetStage,
   onMarkDelivered,
+  onRestoreOrder,
   onEditCustomer,
   onOpenInvoice,
   onToast,
@@ -259,7 +262,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                 ترقية للمرحلة التالية
               </button>
             )}
-            {!customer.delivered && (
+            {!customer.delivered ? (
               <button
                 type="button"
                 onClick={() => {
@@ -271,6 +274,20 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
                 <CheckCircle2 className="w-4 h-4" />
                 <span>استلام النظارة</span>
               </button>
+            ) : (
+              onRestoreOrder && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onRestoreOrder(customer.id);
+                    onClose();
+                  }}
+                  className="min-h-[44px] px-4 rounded-xl bg-gradient-to-br from-[#d9b65c] to-[#a8832f] text-white text-sm font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  <span>استرجاع للطلبات النشطة</span>
+                </button>
+              )
             )}
             <button
               type="button"

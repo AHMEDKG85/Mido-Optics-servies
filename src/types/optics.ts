@@ -55,7 +55,7 @@ export interface PendingSyncOp {
   queuedAt: number;
 }
 
-export type AppPage = 'customers' | 'loyalty' | 'orders' | 'stats' | 'track';
+export type AppPage = 'customers' | 'loyalty' | 'orders' | 'archive' | 'stats' | 'track';
 
 export type SyncState = 'synced' | 'syncing' | 'offline' | 'local-only' | 'error';
 

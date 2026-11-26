@@ -1097,3 +1097,24 @@ export function buildSinglePagePdfFromJpeg(params: {
   return out;
 }
 
+export function filterArchivedOrders(
+  customers: CustomerRecord[],
+  query = ''
+): CustomerRecord[] {
+  const trimmed = query.trim().toLowerCase();
+  return customers
+    .filter((c) => {
+      if (!c.delivered) return false;
+      if (!trimmed) return true;
+      return (
+        c.name.toLowerCase().includes(trimmed) ||
+        c.phone.toLowerCase().includes(trimmed) ||
+        c.frame.toLowerCase().includes(trimmed) ||
+        c.lens.toLowerCase().includes(trimmed) ||
+        c.tok.toLowerCase().includes(trimmed)
+      );
+    })
+    .sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
+}
+
+

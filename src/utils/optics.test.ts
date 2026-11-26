@@ -11,6 +11,7 @@ import {
   calculateRemaining,
   checkEyeLensAvailability,
   collectPickupReminders,
+  filterArchivedOrders,
   formatEgyptianWhatsAppPhone,
   formatFirebaseAuthError,
   getPickupUrgency,
@@ -442,4 +443,66 @@ test('buildSinglePagePdfFromJpeg outputs valid PDF 1.4 structure with XRef offse
   assert.ok(text.includes('xref\n0 6\n'));
   assert.ok(text.trimEnd().endsWith('%%EOF'));
 });
+
+test('filterArchivedOrders returns only delivered customers, supports multi-field search, and sorts newest first', () => {
+  const base: Omit<CustomerRecord, 'id' | 'date' | 'name' | 'phone' | 'frame' | 'lens' | 'tok' | 'delivered'> = {
+    total: 1200,
+    paid: 1200,
+    photo: '',
+    r: ['-1.00', '-', '-'],
+    l: ['-1.00', '-', '-'],
+    status: 4,
+    hist: [1000, 2000, 3000, 4000, 5000],
+    pickupDate: '2026-11-20',
+  };
+
+  const records: CustomerRecord[] = [
+    {
+      ...base,
+      id: 'active-1',
+      date: '2026-11-25T10:00:00Z',
+      name: 'نشط',
+      phone: '01099998888',
+      frame: 'Ray-Ban',
+      lens: 'Clear',
+      tok: 'tok_active',
+      delivered: false,
+    },
+    {
+      ...base,
+      id: 'arch-old',
+      date: '2026-11-10T10:00:00Z',
+      name: 'سمير علي',
+      phone: '01011112222',
+      frame: 'Carrera',
+      lens: 'Blue Cut',
+      tok: 'tok_old_11',
+      delivered: true,
+    },
+    {
+      ...base,
+      id: 'arch-new',
+      date: '2026-11-24T10:00:00Z',
+      name: 'نور الهدى',
+      phone: '01233334444',
+      frame: 'Gucci',
+      lens: 'Photochromic',
+      tok: 'tok_new_22',
+      delivered: true,
+    },
+  ];
+
+  const all = filterArchivedOrders(records);
+  assert.equal(all.length, 2);
+  assert.equal(all[0].id, 'arch-new');
+  assert.equal(all[1].id, 'arch-old');
+
+  assert.equal(filterArchivedOrders(records, 'سمير').length, 1);
+  assert.equal(filterArchivedOrders(records, '0123333')[0]?.id, 'arch-new');
+  assert.equal(filterArchivedOrders(records, 'carrera')[0]?.id, 'arch-old');
+  assert.equal(filterArchivedOrders(records, 'photochromic')[0]?.id, 'arch-new');
+  assert.equal(filterArchivedOrders(records, 'tok_old_11')[0]?.id, 'arch-old');
+  assert.equal(filterArchivedOrders(records, 'نشط').length, 0);
+});
+
 
