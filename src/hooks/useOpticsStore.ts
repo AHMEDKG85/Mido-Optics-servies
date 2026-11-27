@@ -19,15 +19,20 @@ import {
   handleFirestoreError,
   OperationType,
 } from '../lib/firebase';
+import { authenticatedStorefrontFetch } from '../lib/storefrontProxy';
 import {
   deleteStorefrontCatalogItem,
   fetchPublicStorefrontCatalog,
+  fetchStorefrontDeletedOrderCodes,
   fetchStorefrontOrdersOnce,
   formatStorefrontErrorMessage,
   onStorefrontAuthChanged,
   signInStorefrontAdmin,
   signOutStorefrontAdmin,
+  subscribeStorefrontDeletedOrderCodes,
   subscribeStorefrontOrders,
+  deleteStorefrontOrder,
+  saveStorefrontDeletedOrderCodes,
   updateStorefrontOrderStatus,
   upsertStorefrontCatalogItem,
 } from '../lib/storefrontFirebase';
@@ -98,6 +103,7 @@ const STORAGE_PENDING_REPAIRS_KEY = 'mido_pending_repair_ops_v1';
 const STORAGE_WEB_PRODUCTS_KEY = 'mido_web_products_v1';
 const STORAGE_PENDING_WEB_PRODUCTS_KEY = 'mido_pending_web_product_ops_v1';
 const STORAGE_WEB_ORDERS_KEY = 'mido_web_orders_v1';
+const STORAGE_DELETED_WEB_ORDER_CODES_KEY = 'mido_deleted_web_order_codes_v1';
 const STORAGE_PENDING_WEB_ORDERS_KEY = 'mido_pending_web_order_ops_v1';
 const STORAGE_SETTINGS_KEY = 'mido_settings_v1';
 
@@ -333,6 +339,30 @@ function writeLocalWebOrders(list: WebOrder[]): void {
   }
 }
 
+function normalizeWebOrderCode(value: unknown): string {
+  return String(value || '').trim().toUpperCase().slice(0, 64);
+}
+
+function readDeletedWebOrderCodes(): string[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_DELETED_WEB_ORDER_CODES_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed)
+      ? Array.from(new Set(parsed.map(normalizeWebOrderCode).filter(Boolean)))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeDeletedWebOrderCodes(codes: string[]): void {
+  try {
+    localStorage.setItem(STORAGE_DELETED_WEB_ORDER_CODES_KEY, JSON.stringify(codes));
+  } catch {
+    // Keep the in-memory tombstones active if local storage is unavailable.
+  }
+}
+
 function readPendingWebOrderOps(): PendingWebOrderSyncOp[] {
   try {
     const raw = localStorage.getItem(STORAGE_PENDING_WEB_ORDERS_KEY);
@@ -422,6 +452,9 @@ export function useOpticsStore() {
     readPendingWebProductOps()
   );
   const [webOrders, setWebOrders] = useState<WebOrder[]>(() => readLocalWebOrders());
+  const [deletedWebOrderCodes, setDeletedWebOrderCodes] = useState<string[]>(() =>
+    readDeletedWebOrderCodes()
+  );
   const [pendingWebOrderOps, setPendingWebOrderOps] = useState<PendingWebOrderSyncOp[]>(() =>
     readPendingWebOrderOps()
   );
@@ -444,7 +477,11 @@ export function useOpticsStore() {
   const knownServerRepairIds = useRef<Set<string>>(new Set());
   const knownServerWebProductIds = useRef<Set<string>>(new Set());
   const knownServerWebOrderIds = useRef<Set<string>>(new Set());
+  const deletedWebOrderCodesRef = useRef<Set<string>>(new Set(readDeletedWebOrderCodes()));
+  const syncedDeletedOrderUserRef = useRef<string | null>(null);
   const autoConvertedOrderIds = useRef<Set<string>>(new Set());
+  const convertedCustomerByOrderCode = useRef<Map<string, string>>(new Map());
+  const cleanedDeletedOrderCustomerIds = useRef<Set<string>>(new Set());
   const isFlushing = useRef(false);
 
   // Persist local mirror whenever collections/pendingOps/settings change
@@ -483,6 +520,23 @@ export function useOpticsStore() {
   useEffect(() => {
     writeLocalWebOrders(webOrders);
   }, [webOrders]);
+
+  useEffect(() => {
+    const codes = Array.from(new Set(deletedWebOrderCodes.map(normalizeWebOrderCode).filter(Boolean)));
+    deletedWebOrderCodesRef.current = new Set(codes);
+    writeDeletedWebOrderCodes(codes);
+  }, [deletedWebOrderCodes]);
+
+  const rememberDeletedWebOrderCodes = useCallback((codes: string[]) => {
+    const additions = codes
+      .map(normalizeWebOrderCode)
+      .filter((code) => Boolean(code) && !deletedWebOrderCodesRef.current.has(code));
+    if (additions.length === 0) return;
+    const next = Array.from(new Set([...deletedWebOrderCodesRef.current, ...additions]));
+    deletedWebOrderCodesRef.current = new Set(next);
+    writeDeletedWebOrderCodes(next);
+    setDeletedWebOrderCodes(next);
+  }, []);
 
   useEffect(() => {
     writePendingWebOrderOps(pendingWebOrderOps);
@@ -1045,15 +1099,18 @@ export function useOpticsStore() {
     []
   );
 
-  const commitWebOrderDeleteToFirestore = useCallback(async (orderId: string) => {
+  const commitWebOrderDeleteToFirestore = useCallback(async (orderId: string, orderCode?: string) => {
     const id = sanitizeId(orderId, 'wo');
     try {
       await deleteDoc(doc(db, 'webOrders', id));
       knownServerWebOrderIds.current.delete(id);
+      if (orderCode && storefrontUser && !(user && user.emailVerified)) {
+        await deleteStorefrontOrder(orderCode);
+      }
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `webOrders/${id}`);
     }
-  }, []);
+  }, [storefrontUser]);
 
   // Flush queued offline/pre-login ops when authenticated & online
   const flushPendingOps = useCallback(async () => {
@@ -1139,7 +1196,7 @@ export function useOpticsStore() {
           await commitWebOrderUpsertToFirestore(op.order, user.uid);
           succeededWebOrderOpIds.add(op.id);
         } else if (op.type === 'delete') {
-          await commitWebOrderDeleteToFirestore(op.orderId);
+          await commitWebOrderDeleteToFirestore(op.orderId, op.orderCode);
           succeededWebOrderOpIds.add(op.id);
         }
       }
@@ -1576,11 +1633,15 @@ export function useOpticsStore() {
             setPendingWebOrderOps((prev) => {
               const existingIds = new Set(prev.map((p) => p.orderId));
               const additions: PendingWebOrderSyncOp[] = localOnlyOrders
-                .filter((item) => !existingIds.has(item.id))
+                .filter((item) => {
+                  const code = normalizeWebOrderCode(item.orderCode);
+                  return !existingIds.has(item.id) && !(code && deletedWebOrderCodesRef.current.has(code));
+                })
                 .map((item) => ({
                   id: `migrate_wo_${item.id}_${Date.now()}`,
                   type: 'upsert',
                   orderId: item.id,
+                  orderCode: item.orderCode,
                   order: { ...item, ownerId: user.uid },
                   queuedAt: Date.now(),
                 }));
@@ -1597,14 +1658,16 @@ export function useOpticsStore() {
         );
         const pendingUpserts = new Map<string, WebOrder>();
         for (const op of currentPendingOrders) {
-          if (op.type === 'upsert' && op.order) {
+          const code = normalizeWebOrderCode(op.orderCode || op.order?.orderCode);
+          if (op.type === 'upsert' && op.order && !(code && deletedWebOrderCodesRef.current.has(code))) {
             pendingUpserts.set(op.orderId, op.order);
           }
         }
 
         const mergedOrders = new Map<string, WebOrder>();
         for (const item of serverOrders) {
-          if (!pendingDeletes.has(item.id)) {
+          const code = normalizeWebOrderCode(item.orderCode);
+          if (!pendingDeletes.has(item.id) && !(code && deletedWebOrderCodesRef.current.has(code))) {
             mergedOrders.set(item.id, item);
           }
         }
@@ -1775,6 +1838,10 @@ export function useOpticsStore() {
     (customerId: string) => {
       const target = customers.find((c) => c.id === customerId);
       setCustomers((prev) => prev.filter((c) => c.id !== customerId));
+      cleanedDeletedOrderCustomerIds.current.add(customerId);
+      for (const [orderCode, convertedCustomerId] of convertedCustomerByOrderCode.current) {
+        if (convertedCustomerId === customerId) convertedCustomerByOrderCode.current.delete(orderCode);
+      }
 
       if (user && user.emailVerified) {
         void commitDeleteToFirestore(customerId, target?.tok).catch((err) => {
@@ -1795,6 +1862,31 @@ export function useOpticsStore() {
     },
     [customers, user, commitDeleteToFirestore]
   );
+
+  useEffect(() => {
+    const deletedCodes = new Set(deletedWebOrderCodes.map(normalizeWebOrderCode).filter(Boolean));
+    if (deletedCodes.size === 0) return;
+
+    const customerIds = new Set<string>();
+    for (const [orderCode, customerId] of convertedCustomerByOrderCode.current) {
+      if (deletedCodes.has(orderCode)) customerIds.add(customerId);
+    }
+    for (const order of webOrders) {
+      if (deletedCodes.has(normalizeWebOrderCode(order.orderCode)) && order.convertedCustomerId) {
+        customerIds.add(order.convertedCustomerId);
+      }
+    }
+
+    for (const customerId of customerIds) {
+      if (!cleanedDeletedOrderCustomerIds.current.has(customerId)) deleteCustomer(customerId);
+    }
+
+    if (webOrders.some((order) => deletedCodes.has(normalizeWebOrderCode(order.orderCode)))) {
+      setWebOrders((current) =>
+        current.filter((order) => !deletedCodes.has(normalizeWebOrderCode(order.orderCode)))
+      );
+    }
+  }, [deletedWebOrderCodes, webOrders, deleteCustomer]);
 
   const importCustomers = useCallback(
     (rawArray: unknown[]): number => {
@@ -2228,7 +2320,7 @@ export function useOpticsStore() {
           const slugId = isLens
             ? buildStorefrontSlug(product.id, 'lens')
             : buildStorefrontSlug(product.id, 'prod');
-          const res = await fetch('/api/storefront/proxy', {
+          const res = await authenticatedStorefrontFetch('/api/storefront/proxy', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2239,11 +2331,14 @@ export function useOpticsStore() {
             }),
           });
           if (res.ok) {
-            const data = (await res.json()) as { ok?: boolean; upstreamStatus?: number };
+            const data = (await res.json()) as { ok?: boolean; upstreamStatus?: number; data?: { error?: string } };
             if (data.ok) restOk = true;
+            else notes.push(data.data?.error || `رفض خادم الموقع المزامنة (HTTP ${data.upstreamStatus || res.status})`);
+          } else {
+            notes.push(`تعذر الوصول إلى خادم المزامنة (HTTP ${res.status})`);
           }
         } catch {
-          // ignore network errors silently when REST bridge is unavailable
+          notes.push('تعذر الاتصال بخادم مزامنة الموقع');
         }
       }
 
@@ -2252,14 +2347,14 @@ export function useOpticsStore() {
           notes[0] || `تمت مزامنة «${product.name}» تلقائياً مع الموقع`;
         setStorefrontSyncStatus((prev) => ({
           ...prev,
-          state: 'ok',
+          state: notes.length > 0 ? 'partial' : 'ok',
           message: msg,
           lastSyncedAt: Date.now(),
         }));
         return { synced: true, note: msg };
       }
 
-      if (!storefrontUser) {
+      if (!storefrontUser && !notes.length) {
         const msg = 'اربط حساب إدارة المتجر من أعلى الصفحة لدفع التحديثات مباشرة لموقع الويب';
         setStorefrontSyncStatus((prev) => ({
           ...prev,
@@ -2394,8 +2489,25 @@ export function useOpticsStore() {
       if (target && storefrontUser) {
         void deleteStorefrontCatalogItem(target).catch(() => {});
       }
+
+      if (target) {
+        const targetUrl = sanitizeWebsiteUrl(settings.websiteUrl);
+        const isLens = target.category === 'lenses';
+        const externalKey = buildStorefrontSlug(target.id, isLens ? 'lens' : 'prod');
+        if (targetUrl) {
+          void authenticatedStorefrontFetch('/api/storefront/proxy', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              websiteUrl: targetUrl,
+              path: `/api/external/${isLens ? 'lenses' : 'products'}/${externalKey}`,
+              method: 'DELETE',
+            }),
+          }).catch(() => {});
+        }
+      }
     },
-    [webProducts, user, storefrontUser, commitWebProductDeleteToFirestore]
+    [webProducts, user, storefrontUser, settings.websiteUrl, commitWebProductDeleteToFirestore]
   );
 
   const syncAllProductsToStorefront = useCallback(async (): Promise<{
@@ -2491,6 +2603,7 @@ export function useOpticsStore() {
           id: `wo_op_${order.id}_${Date.now()}`,
           type: 'upsert',
           orderId: order.id,
+          orderCode: order.orderCode,
           order,
           queuedAt: Date.now(),
         },
@@ -2508,14 +2621,20 @@ export function useOpticsStore() {
         .filter((x): x is WebOrder => x !== null);
       if (normalizedIncoming.length === 0) return 0;
 
-      const existingMap = new Map<string, WebOrder>(webOrders.map((o) => [o.id, o]));
+      const getOrderKey = (order: WebOrder) => normalizeWebOrderCode(order.orderCode) || order.id;
+      const existingMap = new Map<string, WebOrder>(webOrders.map((o) => [getOrderKey(o), o]));
       const nextToPersist: WebOrder[] = [];
 
       for (const order of normalizedIncoming) {
-        const prev = existingMap.get(order.id);
+        const orderCode = normalizeWebOrderCode(order.orderCode);
+        if (orderCode && deletedWebOrderCodesRef.current.has(orderCode)) continue;
+        const key = getOrderKey(order);
+        const prev = existingMap.get(key);
         let merged: WebOrder = prev
           ? {
               ...order,
+              id: prev.id,
+              orderCode: prev.orderCode || order.orderCode,
               ownerId: prev.ownerId ?? user?.uid,
               convertedCustomerId: prev.convertedCustomerId || order.convertedCustomerId,
               // Preserve local status progression if locally modified more recently
@@ -2531,16 +2650,20 @@ export function useOpticsStore() {
         if (
           settings.autoTransferWebOrdersToWhatsApp !== false &&
           !merged.convertedCustomerId &&
-          !autoConvertedOrderIds.current.has(merged.id) &&
+          !autoConvertedOrderIds.current.has(orderCode || merged.id) &&
           merged.status !== 'cancelled'
         ) {
-          autoConvertedOrderIds.current.add(merged.id);
+          autoConvertedOrderIds.current.add(orderCode || merged.id);
           const { record } = saveCustomer(mapWebOrderToCustomerInput(merged));
+          if (orderCode) convertedCustomerByOrderCode.current.set(orderCode, record.id);
           merged = {
             ...merged,
             convertedCustomerId: record.id,
             updatedAtMs: Date.now(),
           };
+        }
+        if (orderCode && merged.convertedCustomerId) {
+          convertedCustomerByOrderCode.current.set(orderCode, merged.convertedCustomerId);
         }
 
         const changed =
@@ -2553,13 +2676,13 @@ export function useOpticsStore() {
         if (changed) {
           nextToPersist.push(merged);
         }
-        existingMap.set(merged.id, merged);
+        existingMap.set(key, merged);
       }
 
+      setWebOrders(
+        Array.from(existingMap.values()).sort((a, b) => b.createdAtMs - a.createdAtMs)
+      );
       if (nextToPersist.length > 0) {
-        setWebOrders(
-          Array.from(existingMap.values()).sort((a, b) => b.createdAtMs - a.createdAtMs)
-        );
         for (const item of nextToPersist) {
           queueOrSyncWebOrderUpsert(item);
         }
@@ -2584,12 +2707,16 @@ export function useOpticsStore() {
       if (target.convertedCustomerId) {
         const existingCust = customers.find((c) => c.id === target.convertedCustomerId);
         if (existingCust) {
+          const orderCode = normalizeWebOrderCode(target.orderCode);
+          if (orderCode) convertedCustomerByOrderCode.current.set(orderCode, existingCust.id);
           return { customer: existingCust, isNew: false };
         }
       }
 
-      autoConvertedOrderIds.current.add(target.id);
+      const orderCode = normalizeWebOrderCode(target.orderCode);
+      autoConvertedOrderIds.current.add(orderCode || target.id);
       const { record } = saveCustomer(mapWebOrderToCustomerInput(target));
+      if (orderCode) convertedCustomerByOrderCode.current.set(orderCode, record.id);
       const updatedOrder: WebOrder = {
         ...target,
         convertedCustomerId: record.id,
@@ -2628,7 +2755,7 @@ export function useOpticsStore() {
 
       const targetUrl = sanitizeWebsiteUrl(settings.websiteUrl);
       if (targetUrl) {
-        void fetch('/api/storefront/proxy', {
+        void authenticatedStorefrontFetch('/api/storefront/proxy', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -2647,28 +2774,70 @@ export function useOpticsStore() {
 
   const deleteWebOrder = useCallback(
     (orderId: string) => {
+      const target = webOrders.find((order) => order.id === orderId);
+      const orderCode = normalizeWebOrderCode(target?.orderCode);
+      if (orderCode) rememberDeletedWebOrderCodes([orderCode]);
       setWebOrders((prev) => prev.filter((o) => o.id !== orderId));
 
+      if (target?.convertedCustomerId) {
+        deleteCustomer(target.convertedCustomerId);
+      }
+
       if (user && user.emailVerified) {
-        void commitWebOrderDeleteToFirestore(orderId).catch((err) => {
+        void commitWebOrderDeleteToFirestore(orderId, orderCode).catch((err) => {
           setSyncError(err instanceof Error ? err.message : 'تعذر حذف طلب الموقع');
         });
       } else {
         setPendingWebOrderOps((prev) => [
-          ...prev.filter((op) => op.orderId !== orderId),
+          ...prev.filter((op) =>
+            op.orderId !== orderId &&
+            (!orderCode || normalizeWebOrderCode(op.orderCode || op.order?.orderCode) !== orderCode)
+          ),
           {
             id: `del_wo_${orderId}_${Date.now()}`,
             type: 'delete',
             orderId,
+            orderCode: orderCode || undefined,
             queuedAt: Date.now(),
           },
         ]);
       }
-      void fetch(`/api/storefront/webhook-orders/${encodeURIComponent(orderId)}`, {
+        void authenticatedStorefrontFetch(`/api/storefront/webhook-orders/${encodeURIComponent(orderId)}`, {
         method: 'DELETE',
       }).catch(() => {});
+
+      if (orderCode && storefrontUser) {
+        void deleteStorefrontOrder(orderCode).catch((err) => {
+          setStorefrontSyncStatus((prev) => ({
+            ...prev,
+            state: 'error',
+            message: formatStorefrontErrorMessage(err, storefrontUser.email, 'orders'),
+          }));
+        });
+      }
+
+      const targetUrl = sanitizeWebsiteUrl(settings.websiteUrl);
+      if (targetUrl && orderCode) {
+        void authenticatedStorefrontFetch('/api/storefront/proxy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            websiteUrl: targetUrl,
+            path: `/api/external/orders/${encodeURIComponent(orderCode)}`,
+            method: 'DELETE',
+          }),
+        }).catch(() => {});
+      }
     },
-    [user, commitWebOrderDeleteToFirestore]
+    [
+      webOrders,
+      rememberDeletedWebOrderCodes,
+      deleteCustomer,
+      user,
+      storefrontUser,
+      settings.websiteUrl,
+      commitWebOrderDeleteToFirestore,
+    ]
   );
 
   const pullOrdersFromStorefrontNow = useCallback(async (): Promise<{
@@ -2682,10 +2851,60 @@ export function useOpticsStore() {
     let firebaseCount = 0;
     let apiReachable = false;
     const gathered: WebOrder[] = [];
+    const targetUrl = sanitizeWebsiteUrl(settings.websiteUrl);
+
+    if (storefrontUser) {
+      try {
+        const deletedCodes = await fetchStorefrontDeletedOrderCodes();
+        rememberDeletedWebOrderCodes(deletedCodes);
+      } catch {
+        // Keep local tombstones active if the shared deletion ledger is temporarily unavailable.
+      }
+    }
+
+    if (targetUrl) {
+      try {
+        const localDeletedCodes = Array.from(deletedWebOrderCodesRef.current);
+        for (let start = 0; start < localDeletedCodes.length; start += 200) {
+          await authenticatedStorefrontFetch('/api/storefront/proxy', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              websiteUrl: targetUrl,
+              path: '/api/external/deleted-orders',
+              method: 'POST',
+              payload: { orderCodes: localDeletedCodes.slice(start, start + 200) },
+            }),
+          });
+        }
+        const deletedRes = await authenticatedStorefrontFetch('/api/storefront/proxy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            websiteUrl: targetUrl,
+            path: '/api/external/deleted-orders',
+            method: 'GET',
+          }),
+        });
+        if (deletedRes.ok) {
+          const deletedPayload = (await deletedRes.json()) as {
+            ok?: boolean;
+            data?: { deletedOrderCodes?: unknown[] };
+          };
+          if (deletedPayload.ok && Array.isArray(deletedPayload.data?.deletedOrderCodes)) {
+            rememberDeletedWebOrderCodes(
+              deletedPayload.data.deletedOrderCodes.map(normalizeWebOrderCode).filter(Boolean)
+            );
+          }
+        }
+      } catch {
+        // Local tombstones and Firestore tombstones remain active if the remote API is unavailable.
+      }
+    }
 
     // 1. Pull from local Express webhook ingestion queue
     try {
-      const res = await fetch('/api/storefront/webhook-orders');
+      const res = await authenticatedStorefrontFetch('/api/storefront/webhook-orders');
       if (res.ok) {
         const data = (await res.json()) as { orders?: unknown[] };
         if (Array.isArray(data.orders)) {
@@ -2714,10 +2933,9 @@ export function useOpticsStore() {
     }
 
     // 3. Probe Storefront REST API /api/external/orders via server-side proxy
-    const targetUrl = sanitizeWebsiteUrl(settings.websiteUrl);
     if (targetUrl) {
       try {
-        const proxyRes = await fetch('/api/storefront/proxy', {
+        const proxyRes = await authenticatedStorefrontFetch('/api/storefront/proxy', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -2758,7 +2976,7 @@ export function useOpticsStore() {
       : `تم فحص الطلبات الواردة (${webhookCount} عبر Webhook) — اربط حساب إدارة المتجر لمزامنة Firebase المباشرة`;
 
     return { importedCount, webhookCount, firebaseCount, apiReachable, note };
-  }, [storefrontUser, settings.websiteUrl, upsertIncomingWebOrders]);
+  }, [storefrontUser, settings.websiteUrl, upsertIncomingWebOrders, rememberDeletedWebOrderCodes]);
 
   // Keep a ref to latest upsertIncomingWebOrders so polling & Storefront snapshot never churn
   const upsertIncomingWebOrdersRef = useRef(upsertIncomingWebOrders);
@@ -2769,7 +2987,7 @@ export function useOpticsStore() {
   // Live subscription to Storefront Firebase `orders` when Storefront Admin is signed in
   useEffect(() => {
     if (!storefrontUser) return;
-    const unsub = subscribeStorefrontOrders(
+    const unsubOrders = subscribeStorefrontOrders(
       (orders) => {
         upsertIncomingWebOrdersRef.current(orders);
       },
@@ -2781,23 +2999,81 @@ export function useOpticsStore() {
         }));
       }
     );
-    return unsub;
-  }, [storefrontUser]);
+    const unsubDeletedCodes = subscribeStorefrontDeletedOrderCodes(
+      (codes) => {
+        const normalized = codes.map(normalizeWebOrderCode).filter(Boolean);
+        rememberDeletedWebOrderCodes(normalized);
+      },
+      (err) => {
+        setStorefrontSyncStatus((prev) => ({
+          ...prev,
+          state: 'error',
+          message: formatStorefrontErrorMessage(err, storefrontUser.email, 'orders'),
+        }));
+      }
+    );
+    return () => {
+      unsubOrders();
+      unsubDeletedCodes();
+    };
+  }, [storefrontUser, rememberDeletedWebOrderCodes]);
+
+  useEffect(() => {
+    if (!storefrontUser) {
+      syncedDeletedOrderUserRef.current = null;
+      return;
+    }
+    if (syncedDeletedOrderUserRef.current === storefrontUser.uid || deletedWebOrderCodes.length === 0) return;
+    syncedDeletedOrderUserRef.current = storefrontUser.uid;
+    void saveStorefrontDeletedOrderCodes(deletedWebOrderCodes).catch((err) => {
+      setStorefrontSyncStatus((prev) => ({
+        ...prev,
+        state: 'partial',
+        message: formatStorefrontErrorMessage(err, storefrontUser.email, 'orders'),
+      }));
+    });
+  }, [storefrontUser, deletedWebOrderCodes]);
 
   // Poll local webhook receiver every 15s (plus on mount) so orders posted from storefront appear automatically
   useEffect(() => {
     let active = true;
     const pollWebhook = async () => {
+      const targetUrl = sanitizeWebsiteUrl(settings.websiteUrl);
+      if (targetUrl) {
+        try {
+          const res = await authenticatedStorefrontFetch('/api/storefront/proxy', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              websiteUrl: targetUrl,
+              path: '/api/external/deleted-orders',
+              method: 'GET',
+            }),
+          });
+          if (res.ok && active) {
+            const result = (await res.json()) as {
+              ok?: boolean;
+              data?: { deletedOrderCodes?: unknown[] };
+            };
+            if (result.ok && Array.isArray(result.data?.deletedOrderCodes)) {
+              const codes = result.data.deletedOrderCodes.map(normalizeWebOrderCode).filter(Boolean);
+              rememberDeletedWebOrderCodes(codes);
+            }
+          }
+        } catch {
+          // The dashboard remains usable when the storefront API is offline.
+        }
+      }
+
       try {
-        const res = await fetch('/api/storefront/webhook-orders');
-        if (!res.ok || !active) return;
-        const data = (await res.json()) as { orders?: unknown[] };
-        if (Array.isArray(data.orders) && data.orders.length > 0 && active) {
-          const normalized = data.orders
-            .map((raw) => normalizeWebOrder(raw, 'webhook'))
-            .filter((x): x is WebOrder => x !== null);
-          if (normalized.length > 0) {
-            upsertIncomingWebOrdersRef.current(normalized);
+        const res = await authenticatedStorefrontFetch('/api/storefront/webhook-orders');
+        if (res.ok && active) {
+          const data = (await res.json()) as { orders?: unknown[] };
+          if (Array.isArray(data.orders) && data.orders.length > 0) {
+            const normalized = data.orders
+              .map((raw) => normalizeWebOrder(raw, 'webhook'))
+              .filter((x): x is WebOrder => x !== null);
+            if (normalized.length > 0) upsertIncomingWebOrdersRef.current(normalized);
           }
         }
       } catch {
@@ -2810,7 +3086,7 @@ export function useOpticsStore() {
       active = false;
       window.clearInterval(timer);
     };
-  }, []);
+  }, [settings.websiteUrl, rememberDeletedWebOrderCodes]);
 
   const signInStorefront = useCallback(async () => {
     const signedUser = await signInStorefrontAdmin();

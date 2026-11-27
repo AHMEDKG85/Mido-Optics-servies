@@ -258,6 +258,7 @@ export interface PendingWebOrderSyncOp {
   id: string;
   type: 'upsert' | 'delete';
   orderId: string;
+  orderCode?: string;
   order?: WebOrder;
   queuedAt: number;
 }
