@@ -93,6 +93,8 @@ export interface ShopSettings {
   autoWhatsApp: boolean;
   waTemplate: string;
   publicBaseUrl: string;
+  websiteUrl?: string;
+  autoTransferWebOrdersToWhatsApp?: boolean;
 }
 
 export type PriceItemCategory = 'frame' | 'lens' | 'service';
@@ -141,14 +143,135 @@ export interface PendingRepairSyncOp {
   queuedAt: number;
 }
 
+export type WebProductCategory =
+  | 'medical_glasses'
+  | 'sunglasses'
+  | 'lenses'
+  | 'contact_lenses'
+  | 'accessories';
+
+export const WEB_PRODUCT_CATEGORY_LABELS: Record<WebProductCategory, string> = {
+  medical_glasses: 'نظارة طبية',
+  sunglasses: 'نظارات شمسية',
+  lenses: 'عدسات',
+  contact_lenses: 'عدسات لاصقة',
+  accessories: 'إكسسوارات',
+};
+
+export interface WebProduct {
+  id: string;
+  ownerId?: string;
+  name: string;
+  category: WebProductCategory;
+  price: number;
+  colors: string[];
+  available: boolean;
+  notes: string;
+  photo: string;
+  createdAtMs: number;
+  updatedAtMs: number;
+}
+
+export interface PendingWebProductSyncOp {
+  id: string;
+  type: 'upsert' | 'delete';
+  productId: string;
+  product?: WebProduct;
+  queuedAt: number;
+}
+
+export type WebOrderStatus =
+  | 'pending'
+  | 'confirmed'
+  | 'preparing'
+  | 'ready'
+  | 'delivered'
+  | 'cancelled';
+
+export const WEB_ORDER_STATUS_LABELS: Record<WebOrderStatus, string> = {
+  pending: 'طلب جديد',
+  confirmed: 'تم التأكيد',
+  preparing: 'جاري التجهيز',
+  ready: 'جاهز للاستلام',
+  delivered: 'تم التسليم',
+  cancelled: 'ملغي',
+};
+
+export interface WebOrderItem {
+  id: string;
+  productId?: string;
+  productSlug?: string;
+  productName: string;
+  category: string;
+  variantId?: string;
+  colorName: string;
+  colorHex: string;
+  imageUrl: string;
+  framePrice: number;
+  lensId?: string;
+  lensName: string;
+  lensPrice: number;
+  quantity: number;
+  orderType: 'standard' | 'preorder';
+}
+
+export interface WebOrderPrescriptionEye {
+  sph: string;
+  cyl: string;
+  axis: string;
+  add?: string;
+}
+
+export interface WebOrderPrescription {
+  mode: string;
+  od: WebOrderPrescriptionEye;
+  os: WebOrderPrescriptionEye;
+  ipd: string;
+  imageUrl: string;
+}
+
+export type WebOrderSource = 'storefront_firebase' | 'webhook' | 'api' | 'manual';
+
+export interface WebOrder {
+  id: string;
+  ownerId?: string;
+  orderCode: string;
+  invoiceNumber: string;
+  orderType: 'standard' | 'preorder';
+  customerName: string;
+  customerPhone: string;
+  customerAddress: string;
+  notes: string;
+  items: WebOrderItem[];
+  prescription: WebOrderPrescription | null;
+  frameSubtotal: number;
+  lensSubtotal: number;
+  total: number;
+  status: WebOrderStatus;
+  source: WebOrderSource;
+  convertedCustomerId?: string;
+  createdAtMs: number;
+  updatedAtMs: number;
+}
+
+export interface PendingWebOrderSyncOp {
+  id: string;
+  type: 'upsert' | 'delete';
+  orderId: string;
+  order?: WebOrder;
+  queuedAt: number;
+}
+
 export type NavPage =
   | 'customers'
   | 'orders'
+  | 'web-orders'
   | 'repairs'
   | 'repair-orders'
   | 'archive'
   | 'prices'
-  | 'stats';
+  | 'stats'
+  | 'web-control';
 
 export type AppPage = NavPage | 'track' | 'rtrack';
 

@@ -13,6 +13,14 @@ import {
   RepairRecord,
   USAGE_TYPE_LABELS,
   UsageType,
+  WEB_PRODUCT_CATEGORY_LABELS,
+  WebOrder,
+  WebOrderItem,
+  WebOrderPrescription,
+  WebOrderSource,
+  WebOrderStatus,
+  WebProduct,
+  WebProductCategory,
 } from '../types/optics';
 
 export function clampNumber(value: unknown, min = 0, max = 10_000_000): number {
@@ -1663,6 +1671,580 @@ export const SAMPLE_REPAIRS: RepairRecord[] = [
     delivered: false,
   },
 ];
+
+export const WEB_PRODUCT_CATEGORIES: WebProductCategory[] = [
+  'medical_glasses',
+  'sunglasses',
+  'lenses',
+  'contact_lenses',
+  'accessories',
+];
+
+export const WEB_COLOR_PRESETS: Array<{ name: string; hex: string }> = [
+  { name: 'أسود', hex: '#111827' },
+  { name: 'ذهبي', hex: '#c9a24b' },
+  { name: 'فضي', hex: '#94a3b8' },
+  { name: 'بني', hex: '#78350f' },
+  { name: 'هافان', hex: '#b45309' },
+  { name: 'شفاف', hex: '#e2e8f0' },
+  { name: 'أزرق', hex: '#2563eb' },
+  { name: 'أخضر', hex: '#16a34a' },
+  { name: 'رمادي', hex: '#64748b' },
+  { name: 'أحمر', hex: '#dc2626' },
+  { name: 'وردي', hex: '#ec4899' },
+  { name: 'أبيض', hex: '#ffffff' },
+];
+
+export function generateWebProductId(): string {
+  return `wp_${Date.now()}_${generateToken(4)}`;
+}
+
+export function normalizeWebProductCategory(raw: unknown): WebProductCategory {
+  if (
+    raw === 'medical_glasses' ||
+    raw === 'sunglasses' ||
+    raw === 'lenses' ||
+    raw === 'contact_lenses' ||
+    raw === 'accessories'
+  ) {
+    return raw;
+  }
+  return 'medical_glasses';
+}
+
+export function sanitizeProductColors(raw: unknown): string[] {
+  const source = Array.isArray(raw)
+    ? raw
+    : typeof raw === 'string'
+    ? raw.split(/[،,|/]+/)
+    : [];
+
+  const seen = new Set<string>();
+  const cleaned: string[] = [];
+
+  for (const entry of source) {
+    const label = String(entry ?? '').trim().slice(0, 40);
+    if (!label) continue;
+    const key = label.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    cleaned.push(label);
+    if (cleaned.length >= 15) break;
+  }
+
+  return cleaned;
+}
+
+export function sanitizeWebsiteUrl(raw: unknown): string {
+  const trimmed = String(raw ?? '').trim().slice(0, 200);
+  if (!trimmed) return '';
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return '';
+}
+
+export function normalizeWebProduct(raw: unknown): WebProduct | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  const name = String(obj.name ?? '').trim().slice(0, 120);
+  if (!name) return null;
+
+  const createdAtMs =
+    typeof obj.createdAtMs === 'number' && Number.isFinite(obj.createdAtMs) && obj.createdAtMs >= 0
+      ? Math.trunc(obj.createdAtMs)
+      : Date.now();
+  const updatedAtMs =
+    typeof obj.updatedAtMs === 'number' && Number.isFinite(obj.updatedAtMs) && obj.updatedAtMs >= 0
+      ? Math.trunc(obj.updatedAtMs)
+      : createdAtMs;
+
+  return {
+    id: sanitizeId(obj.id, 'wp'),
+    ownerId: obj.ownerId ? String(obj.ownerId).slice(0, 128) : undefined,
+    name,
+    category: normalizeWebProductCategory(obj.category),
+    price: clampNumber(obj.price),
+    colors: sanitizeProductColors(obj.colors),
+    available: typeof obj.available === 'boolean' ? obj.available : true,
+    notes: String(obj.notes ?? '').trim().slice(0, 240),
+    photo: sanitizeFramePhoto(obj.photo),
+    createdAtMs,
+    updatedAtMs,
+  };
+}
+
+export function filterWebProducts(
+  products: WebProduct[],
+  category: WebProductCategory | 'all' = 'all',
+  availability: 'all' | 'available' | 'unavailable' = 'all',
+  query = ''
+): WebProduct[] {
+  const trimmed = query.trim().toLowerCase();
+  return products
+    .filter((item) => {
+      if (category !== 'all' && item.category !== category) return false;
+      if (availability === 'available' && !item.available) return false;
+      if (availability === 'unavailable' && item.available) return false;
+      if (!trimmed) return true;
+      return (
+        item.name.toLowerCase().includes(trimmed) ||
+        item.notes.toLowerCase().includes(trimmed) ||
+        item.colors.some((color) => color.toLowerCase().includes(trimmed))
+      );
+    })
+    .sort((a, b) => b.updatedAtMs - a.updatedAtMs);
+}
+
+export const DEFAULT_STOREFRONT_WEBSITE_URL = 'https://mido-web-site.vercel.app';
+
+export const WEB_ORDER_STATUSES: WebOrderStatus[] = [
+  'pending',
+  'confirmed',
+  'preparing',
+  'ready',
+  'delivered',
+  'cancelled',
+];
+
+export function sanitizeRemoteOrDataImage(raw: unknown): string {
+  const str = String(raw ?? '').trim();
+  if (!str) return '';
+  if (str.startsWith('data:image/') && str.length <= 350_000) return str;
+  if (/^https?:\/\//i.test(str) && str.length <= 1000) return str;
+  if (str.startsWith('/') && !str.startsWith('//') && str.length <= 500) return str;
+  return '';
+}
+
+export function buildStorefrontSlug(rawId: string, prefix = 'prod'): string {
+  const cleaned = String(rawId || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 100);
+  if (cleaned.length >= 2) return cleaned;
+  let hash = 0;
+  for (let i = 0; i < rawId.length; i += 1) {
+    hash = (hash * 31 + rawId.charCodeAt(i)) >>> 0;
+  }
+  return `${prefix}-${hash.toString(36) || 'item'}`;
+}
+
+export function buildStorefrontStableNumericId(rawId: string): number {
+  const numericOnly = Number(String(rawId || '').replace(/\D+/g, '').slice(0, 9));
+  if (Number.isInteger(numericOnly) && numericOnly > 0) return numericOnly;
+  let hash = 0;
+  for (let i = 0; i < rawId.length; i += 1) {
+    hash = (hash * 33 + rawId.charCodeAt(i)) % 900_000;
+  }
+  return 100_000 + Math.abs(hash);
+}
+
+export function resolveColorHex(colorName: string): string {
+  const lower = String(colorName || '').trim().toLowerCase();
+  const match = WEB_COLOR_PRESETS.find((c) => c.name.toLowerCase() === lower);
+  return match ? match.hex : '#141413';
+}
+
+export type StorefrontProductCategory =
+  | 'prescription'
+  | 'sunglasses'
+  | 'contact_lenses'
+  | 'accessories';
+
+export interface StorefrontProductPayload {
+  slug: string;
+  name: string;
+  category: StorefrontProductCategory;
+  price: number;
+  shortDesc: string;
+  fullDesc: string;
+  frameShape: string;
+  material: string;
+  dimensions: string;
+  published: boolean;
+  allowPreorder: boolean;
+  preorderNote: string;
+  variants: Array<{
+    id: number;
+    colorName: string;
+    colorHex: string;
+    stock: number;
+    images: string[];
+    sortOrder: number;
+  }>;
+}
+
+export interface StorefrontLensPayload {
+  docId: string;
+  id: number;
+  name: string;
+  subtitle: string;
+  price: number;
+  imageUrl: string;
+  details: string[];
+  fullDescription: string;
+  refractiveIndex: string;
+  published: boolean;
+  sortOrder: number;
+}
+
+export function mapWebProductCategoryToStorefront(
+  category: WebProductCategory
+): StorefrontProductCategory {
+  switch (category) {
+    case 'sunglasses':
+      return 'sunglasses';
+    case 'contact_lenses':
+      return 'contact_lenses';
+    case 'accessories':
+      return 'accessories';
+    case 'medical_glasses':
+    default:
+      return 'prescription';
+  }
+}
+
+export function mapWebProductToStorefrontProduct(
+  product: WebProduct
+): StorefrontProductPayload {
+  const slug = buildStorefrontSlug(product.id, 'prod');
+  const numericId = buildStorefrontStableNumericId(product.id);
+  const activeColors = product.colors.length > 0 ? product.colors : ['أساسي'];
+  const stockPerVariant = product.available ? 10 : 0;
+  const images = product.photo ? [product.photo] : [];
+
+  return {
+    slug,
+    name: product.name.slice(0, 140),
+    category: mapWebProductCategoryToStorefront(product.category),
+    price: clampNumber(product.price),
+    shortDesc: (product.notes || WEB_PRODUCT_CATEGORY_LABELS[product.category]).slice(0, 320),
+    fullDesc: (product.notes || product.name).slice(0, 2000),
+    frameShape: 'classic',
+    material: '',
+    dimensions: '',
+    published: true,
+    allowPreorder: false,
+    preorderNote: product.available ? '' : 'غير متوفرة حالياً',
+    variants: activeColors.slice(0, 15).map((colorName, idx) => ({
+      id: numericId * 100 + idx + 1,
+      colorName,
+      colorHex: resolveColorHex(colorName),
+      stock: stockPerVariant,
+      images,
+      sortOrder: idx,
+    })),
+  };
+}
+
+export function mapWebProductToStorefrontLens(
+  product: WebProduct
+): StorefrontLensPayload {
+  const numericId = buildStorefrontStableNumericId(product.id);
+  const safeRemoteImg =
+    product.photo && /^https?:\/\//i.test(product.photo) && product.photo.length <= 500
+      ? product.photo
+      : product.photo && product.photo.startsWith('/') && product.photo.length <= 500
+      ? product.photo
+      : '/src/assets/images/optical_lens_crystal_1795761233547.jpg';
+  const noteParts = product.notes
+    ? product.notes
+        .split(/[،,|•\n]+/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .slice(0, 10)
+    : [];
+
+  return {
+    docId: `lens-${buildStorefrontSlug(product.id, 'lens')}`,
+    id: numericId,
+    name: product.name.slice(0, 140),
+    subtitle: (product.notes || 'عدسة طبية معتمدة').slice(0, 240),
+    price: clampNumber(product.price),
+    imageUrl: safeRemoteImg,
+    details: noteParts.length > 0 ? noteParts : ['عدسة طبية معتمدة'],
+    fullDescription: (product.notes || product.name).slice(0, 1500),
+    refractiveIndex: '1.56',
+    published: Boolean(product.available),
+    sortOrder: 0,
+  };
+}
+
+export function normalizeWebOrderStatus(raw: unknown): WebOrderStatus {
+  const val = String(raw ?? '').trim().toLowerCase();
+  if (
+    val === 'pending' ||
+    val === 'confirmed' ||
+    val === 'preparing' ||
+    val === 'ready' ||
+    val === 'delivered' ||
+    val === 'cancelled'
+  ) {
+    return val;
+  }
+  return 'pending';
+}
+
+function parseFlexibleTimestampMs(raw: unknown, fallback = Date.now()): number {
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) {
+    return Math.trunc(raw);
+  }
+  if (typeof raw === 'string' && raw.trim()) {
+    const parsed = Date.parse(raw.trim());
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+  if (raw && typeof raw === 'object') {
+    const rec = raw as { toMillis?: () => number; seconds?: number };
+    if (typeof rec.toMillis === 'function') {
+      const ms = rec.toMillis();
+      if (Number.isFinite(ms)) return Math.trunc(ms);
+    }
+    if (typeof rec.seconds === 'number' && Number.isFinite(rec.seconds)) {
+      return Math.trunc(rec.seconds * 1000);
+    }
+  }
+  return fallback;
+}
+
+export function generateWebOrderId(orderCode?: string): string {
+  const cleanCode = String(orderCode || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 48);
+  if (cleanCode) return `wo_${cleanCode}`.slice(0, 64);
+  return `wo_${Date.now()}_${generateToken(4)}`;
+}
+
+function normalizeWebOrderItem(raw: unknown, idx: number): WebOrderItem | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  const productName = String(obj.productName ?? obj.name ?? '').trim().slice(0, 140);
+  const lensName = String(obj.lensName ?? '').trim().slice(0, 140);
+  if (!productName && !lensName) return null;
+
+  return {
+    id: String(obj.id ?? idx + 1).slice(0, 64),
+    productId: obj.productId !== undefined && obj.productId !== null ? String(obj.productId).slice(0, 64) : undefined,
+    productSlug: obj.productSlug ? String(obj.productSlug).slice(0, 120) : undefined,
+    productName: productName || 'عدسات طبية',
+    category: String(obj.category ?? 'prescription').slice(0, 40),
+    variantId: obj.variantId !== undefined && obj.variantId !== null ? String(obj.variantId).slice(0, 64) : undefined,
+    colorName: String(obj.colorName ?? '').trim().slice(0, 60),
+    colorHex: String(obj.colorHex ?? '').trim().slice(0, 20),
+    imageUrl: sanitizeRemoteOrDataImage(obj.imageUrl),
+    framePrice: clampNumber(obj.framePrice),
+    lensId: obj.lensId !== undefined && obj.lensId !== null ? String(obj.lensId).slice(0, 64) : undefined,
+    lensName,
+    lensPrice: clampNumber(obj.lensPrice),
+    quantity: Math.max(1, Math.min(999, Math.trunc(clampNumber(obj.quantity ?? 1, 1, 999)))),
+    orderType: obj.orderType === 'preorder' ? 'preorder' : 'standard',
+  };
+}
+
+function normalizeWebOrderPrescription(raw: unknown): WebOrderPrescription | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  const rawOd = (obj.od && typeof obj.od === 'object' ? obj.od : {}) as Record<string, unknown>;
+  const rawOs = (obj.os && typeof obj.os === 'object' ? obj.os : {}) as Record<string, unknown>;
+
+  const cleanPower = (val: unknown) => String(val ?? '').trim().slice(0, 16) || '-';
+  const odSph = cleanPower(rawOd.sph);
+  const odCyl = cleanPower(rawOd.cyl);
+  const odAxis = cleanPower(rawOd.axis);
+  const odAdd = String(rawOd.add ?? obj.add ?? '').trim().slice(0, 16);
+
+  const osSph = cleanPower(rawOs.sph);
+  const osCyl = cleanPower(rawOs.cyl);
+  const osAxis = cleanPower(rawOs.axis);
+  const osAdd = String(rawOs.add ?? '').trim().slice(0, 16);
+
+  const imageUrl = sanitizeRemoteOrDataImage(obj.imageUrl);
+  const ipd = String(obj.ipd ?? '').trim().slice(0, 16);
+  const mode = String(obj.mode ?? '').trim().slice(0, 40);
+
+  const hasAnyValue =
+    odSph !== '-' ||
+    odCyl !== '-' ||
+    odAxis !== '-' ||
+    osSph !== '-' ||
+    osCyl !== '-' ||
+    osAxis !== '-' ||
+    Boolean(odAdd || osAdd || ipd || imageUrl);
+
+  if (!hasAnyValue) return null;
+
+  return {
+    mode,
+    od: { sph: odSph, cyl: odCyl, axis: odAxis, add: odAdd },
+    os: { sph: osSph, cyl: osCyl, axis: osAxis, add: osAdd },
+    ipd,
+    imageUrl,
+  };
+}
+
+export function normalizeWebOrder(
+  raw: unknown,
+  fallbackSource: WebOrderSource = 'webhook'
+): WebOrder | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  const customerName = String(obj.customerName ?? obj.name ?? '').trim().slice(0, 120);
+  if (!customerName) return null;
+
+  const orderCode =
+    String(obj.orderCode ?? obj.code ?? '').trim().slice(0, 64) ||
+    `WEB-${generateToken(6).toUpperCase()}`;
+  const invoiceNumber =
+    String(obj.invoiceNumber ?? '').trim().slice(0, 64) || orderCode;
+
+  const items = Array.isArray(obj.items)
+    ? obj.items
+        .map((item, idx) => normalizeWebOrderItem(item, idx))
+        .filter((item): item is WebOrderItem => item !== null)
+        .slice(0, 50)
+    : [];
+
+  const frameSubtotal =
+    obj.frameSubtotal !== undefined
+      ? clampNumber(obj.frameSubtotal)
+      : items.reduce((sum, it) => sum + it.framePrice * it.quantity, 0);
+  const lensSubtotal =
+    obj.lensSubtotal !== undefined
+      ? clampNumber(obj.lensSubtotal)
+      : items.reduce((sum, it) => sum + it.lensPrice * it.quantity, 0);
+  const total =
+    obj.total !== undefined ? clampNumber(obj.total) : frameSubtotal + lensSubtotal;
+
+  const createdAtMs = parseFlexibleTimestampMs(obj.createdAtMs ?? obj.createdAt, Date.now());
+  const updatedAtMs = parseFlexibleTimestampMs(obj.updatedAtMs ?? obj.updatedAt, createdAtMs);
+
+  const rawSource = String(obj.source ?? fallbackSource);
+  const source: WebOrderSource =
+    rawSource === 'storefront_firebase' ||
+    rawSource === 'webhook' ||
+    rawSource === 'api' ||
+    rawSource === 'manual'
+      ? rawSource
+      : fallbackSource;
+
+  const id = obj.id ? sanitizeId(obj.id, 'wo') : generateWebOrderId(orderCode);
+
+  return {
+    id,
+    ownerId: obj.ownerId ? String(obj.ownerId).slice(0, 128) : undefined,
+    orderCode,
+    invoiceNumber,
+    orderType: obj.orderType === 'preorder' ? 'preorder' : 'standard',
+    customerName,
+    customerPhone: String(obj.customerPhone ?? obj.phone ?? '').trim().slice(0, 30),
+    customerAddress: String(obj.customerAddress ?? obj.address ?? '').trim().slice(0, 240),
+    notes: String(obj.notes ?? '').trim().slice(0, 400),
+    items,
+    prescription: normalizeWebOrderPrescription(obj.prescription),
+    frameSubtotal,
+    lensSubtotal,
+    total,
+    status: normalizeWebOrderStatus(obj.status),
+    source,
+    convertedCustomerId: obj.convertedCustomerId
+      ? sanitizeId(obj.convertedCustomerId, 'c')
+      : undefined,
+    createdAtMs,
+    updatedAtMs,
+  };
+}
+
+export function filterWebOrders(
+  orders: WebOrder[],
+  status: WebOrderStatus | 'all' = 'all',
+  query = ''
+): WebOrder[] {
+  const trimmed = query.trim().toLowerCase();
+  return orders
+    .filter((order) => {
+      if (status !== 'all' && order.status !== status) return false;
+      if (!trimmed) return true;
+      return (
+        order.customerName.toLowerCase().includes(trimmed) ||
+        order.customerPhone.toLowerCase().includes(trimmed) ||
+        order.orderCode.toLowerCase().includes(trimmed) ||
+        order.invoiceNumber.toLowerCase().includes(trimmed) ||
+        order.items.some(
+          (item) =>
+            item.productName.toLowerCase().includes(trimmed) ||
+            item.lensName.toLowerCase().includes(trimmed) ||
+            item.colorName.toLowerCase().includes(trimmed)
+        )
+      );
+    })
+    .sort((a, b) => b.createdAtMs - a.createdAtMs);
+}
+
+export function mapWebOrderToCustomerInput(order: WebOrder): {
+  name: string;
+  phone: string;
+  frame: string;
+  lens: string;
+  framePrice: number;
+  lensPrice: number;
+  total: number;
+  paid: number;
+  photo: string;
+  r: [string, string, string];
+  l: [string, string, string];
+  add: string;
+  usageType: UsageType;
+  pickupDate: string;
+} {
+  const frameSummary = order.items
+    .map((item) => {
+      const color = item.colorName ? ` (${item.colorName})` : '';
+      const qty = item.quantity > 1 ? ` ×${item.quantity}` : '';
+      return `${item.productName}${color}${qty}`;
+    })
+    .filter(Boolean)
+    .join(' + ')
+    .slice(0, 120);
+
+  const lensSummary = Array.from(
+    new Set(order.items.map((item) => item.lensName).filter(Boolean))
+  )
+    .join(' + ')
+    .slice(0, 120);
+
+  const rx = order.prescription;
+  const r: [string, string, string] = rx
+    ? [rx.od.sph || '-', rx.od.cyl || '-', rx.od.axis || '-']
+    : ['-', '-', '-'];
+  const l: [string, string, string] = rx
+    ? [rx.os.sph || '-', rx.os.cyl || '-', rx.os.axis || '-']
+    : ['-', '-', '-'];
+  const add = sanitizeAddPower(rx?.os.add || rx?.od.add || '');
+
+  const photo =
+    order.items
+      .map((it) => it.imageUrl)
+      .find((url) => url.startsWith('data:image/') && url.length <= 350_000) || '';
+
+  return {
+    name: order.customerName.slice(0, 120),
+    phone: order.customerPhone.slice(0, 30),
+    frame: frameSummary || `طلب موقع #${order.orderCode}`.slice(0, 120),
+    lens: lensSummary,
+    framePrice: clampNumber(order.frameSubtotal),
+    lensPrice: clampNumber(order.lensSubtotal),
+    total: clampNumber(order.total),
+    paid: 0,
+    photo,
+    r,
+    l,
+    add,
+    usageType: add ? 'reading' : '',
+    pickupDate: '',
+  };
+}
+
+
 
 
 

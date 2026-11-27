@@ -16,6 +16,8 @@ import {
 import { ArchivePage } from './components/ArchivePage';
 import { PriceListPage } from './components/PriceListPage';
 import { StatsDashboardPage } from './components/StatsDashboardPage';
+import { WebControlPanelPage } from './components/WebControlPanelPage';
+import { WebOrdersPage } from './components/WebOrdersPage';
 import { CustomerFormModal } from './components/CustomerFormModal';
 import { RepairFormModal } from './components/RepairFormModal';
 import { OrderDetailModal } from './components/OrderDetailModal';
@@ -25,7 +27,7 @@ import { CustomerInput, RepairInput, useOpticsStore } from './hooks/useOpticsSto
 import { useLensInventory } from './hooks/useLensInventory';
 import { usePickupNotifications } from './hooks/usePickupNotifications';
 import { signInWithGoogle, signOutUser } from './lib/firebase';
-import { AppPage, CustomerRecord, NavPage, RepairRecord } from './types/optics';
+import { AppPage, CustomerRecord, NavPage, RepairRecord, WebOrder } from './types/optics';
 import {
   AuthErrorSummary,
   buildRepairStageWhatsAppDispatch,
@@ -52,11 +54,13 @@ function parseHashRoute(hash: string): { page: AppPage; trackToken: string | nul
   }
   if (
     clean === 'orders' ||
+    clean === 'web-orders' ||
     clean === 'repairs' ||
     clean === 'repair-orders' ||
     clean === 'archive' ||
     clean === 'prices' ||
     clean === 'stats' ||
+    clean === 'web-control' ||
     clean === 'customers'
   ) {
     return { page: clean, trackToken: null };
@@ -502,6 +506,36 @@ function MidoOpticsApp() {
     showToast('تم تسجيل الخروج');
   };
 
+  const handleSignInStorefront = async () => {
+    setAuthError(null);
+    try {
+      await store.signInStorefront();
+      showToast('تم ربط حساب إدارة المتجر بنجاح، جاري مزامنة الموقع');
+    } catch (err) {
+      const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
+      const summary = formatFirebaseAuthError(err, hostname);
+      setAuthError(summary);
+      showToast(summary.title);
+    }
+  };
+
+  const handleSignOutStorefront = async () => {
+    await store.signOutStorefront();
+    showToast('تم فصل حساب إدارة المتجر');
+  };
+
+  const handleTransferWebOrderToWhatsApp = (order: WebOrder) => {
+    const res = store.convertWebOrderToCustomer(order.id);
+    if (!res) return;
+    prepareWhatsAppDispatch(res.customer, { copyImage: true });
+    navigate('orders');
+    showToast(
+      res.isNew
+        ? `تم تحويل طلب #${order.orderCode} إلى متابعة وواتساب وتجهيز الوصل`
+        : `تم فتح متابعة واتساب لطلب ${res.customer.name}`
+    );
+  };
+
   // Public Customer or Repair Tracking Route (#track-<tok> / #rtrack-<tok>)
   if (
     (routeState.page === 'track' || routeState.page === 'rtrack') &&
@@ -528,6 +562,8 @@ function MidoOpticsApp() {
     ? store.repairs.find((r) => r.id === invoiceRepairId) ?? null
     : null;
 
+  const pendingWebOrdersCount = store.webOrders.filter((o) => o.status === 'pending').length;
+
   return (
     <div className="app-print-root min-h-screen flex flex-col bg-[#f3f9fd] dark:bg-[#0d1722] text-[#1d2733] dark:text-[#eef3f8] pb-20 md:pb-8">
       <div className="app-shell-print-hide flex-1 flex flex-col">
@@ -536,6 +572,7 @@ function MidoOpticsApp() {
           onNavigate={navigate}
           onAddCustomer={handleOpenAdd}
           shopName={store.settings.shopName}
+          pendingWebOrdersCount={pendingWebOrdersCount}
         />
 
         <SyncToolbar
@@ -914,6 +951,40 @@ function MidoOpticsApp() {
 
           {routeState.page === 'stats' && (
             <StatsDashboardPage customers={store.customers} repairs={store.repairs} />
+          )}
+
+          {routeState.page === 'web-orders' && (
+            <WebOrdersPage
+              orders={store.webOrders}
+              customers={store.customers}
+              settings={store.settings}
+              storefrontUser={store.storefrontUser}
+              onSignInStorefront={handleSignInStorefront}
+              onSignOutStorefront={handleSignOutStorefront}
+              onPullNow={store.pullOrdersFromStorefrontNow}
+              onUpdateStatus={store.updateWebOrderStatus}
+              onTransferToWhatsApp={handleTransferWebOrderToWhatsApp}
+              onDeleteOrder={store.deleteWebOrder}
+              onUpdateSettings={store.updateSettings}
+              onToast={showToast}
+            />
+          )}
+
+          {routeState.page === 'web-control' && (
+            <WebControlPanelPage
+              products={store.webProducts}
+              settings={store.settings}
+              storefrontUser={store.storefrontUser}
+              storefrontSyncStatus={store.storefrontSyncStatus}
+              onSignInStorefront={handleSignInStorefront}
+              onSignOutStorefront={handleSignOutStorefront}
+              onSyncAllToStorefront={store.syncAllProductsToStorefront}
+              onSaveProduct={store.saveWebProduct}
+              onToggleAvailability={store.toggleWebProductAvailability}
+              onDeleteProduct={store.deleteWebProduct}
+              onUpdateSettings={store.updateSettings}
+              onToast={showToast}
+            />
           )}
         </main>
 

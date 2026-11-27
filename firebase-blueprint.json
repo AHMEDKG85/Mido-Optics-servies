@@ -302,6 +302,15 @@
           "maxLength": 200,
           "description": "Optional public base URL for generated customer tracking links."
         },
+        "websiteUrl": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Optional connected storefront website URL managed by the Website Control Panel."
+        },
+        "autoTransferWebOrdersToWhatsApp": {
+          "type": "boolean",
+          "description": "Whether incoming website orders automatically transfer to the WhatsApp follow-up customer queue."
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time",
@@ -626,6 +635,159 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "WebProduct": {
+      "title": "WebProduct",
+      "description": "Storefront catalog product managed in the Website Control Panel across 5 optical categories with colors, pricing, and live availability state.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "description": "Unique identifier for the website catalog product."
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "description": "Firebase Auth UID of the shop owner."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Product display name."
+        },
+        "category": {
+          "type": "string",
+          "enum": ["medical_glasses", "sunglasses", "lenses", "contact_lenses", "accessories"],
+          "description": "Website product category."
+        },
+        "price": {
+          "type": "number",
+          "description": "Storefront selling price in EGP."
+        },
+        "colors": {
+          "type": "array",
+          "description": "Available color names for this product (up to 15 entries)."
+        },
+        "available": {
+          "type": "boolean",
+          "description": "True when available on the website; false when marked out of stock (غير متوفرة حالياً)."
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 240,
+          "description": "Optional storefront product specifications or description."
+        },
+        "photo": {
+          "type": "string",
+          "maxLength": 350000,
+          "description": "Compressed product JPEG data URL or empty string."
+        },
+        "createdAtMs": {
+          "type": "number",
+          "description": "Client creation timestamp in milliseconds."
+        },
+        "updatedAtMs": {
+          "type": "number",
+          "description": "Client last update timestamp in milliseconds."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last update timestamp."
+        }
+      },
+      "required": [
+        "id",
+        "ownerId",
+        "name",
+        "category",
+        "price",
+        "colors",
+        "available",
+        "notes",
+        "photo",
+        "createdAtMs",
+        "updatedAtMs",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "WebOrder": {
+      "title": "WebOrder",
+      "description": "Customer order received from the connected storefront website with items, prescription measurements, and WhatsApp transfer link.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "orderCode": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "invoiceNumber": { "type": "string", "maxLength": 64 },
+        "orderType": { "type": "string", "enum": ["standard", "preorder"] },
+        "customerName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "customerPhone": { "type": "string", "maxLength": 30 },
+        "customerAddress": { "type": "string", "maxLength": 240 },
+        "notes": { "type": "string", "maxLength": 400 },
+        "items": { "type": "array" },
+        "prescription": { "type": ["object", "null"] },
+        "frameSubtotal": { "type": "number" },
+        "lensSubtotal": { "type": "number" },
+        "total": { "type": "number" },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "confirmed", "preparing", "ready", "delivered", "cancelled"]
+        },
+        "source": {
+          "type": "string",
+          "enum": ["storefront_firebase", "webhook", "api", "manual"]
+        },
+        "convertedCustomerId": { "type": "string", "maxLength": 64 },
+        "createdAtMs": { "type": "number" },
+        "updatedAtMs": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "ownerId",
+        "orderCode",
+        "invoiceNumber",
+        "orderType",
+        "customerName",
+        "customerPhone",
+        "customerAddress",
+        "notes",
+        "items",
+        "prescription",
+        "frameSubtotal",
+        "lensSubtotal",
+        "total",
+        "status",
+        "source",
+        "createdAtMs",
+        "updatedAtMs",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -664,6 +826,18 @@
         "$ref": "#/entities/RepairTrack"
       },
       "description": "Non-PII public tracking view for a specific repair token, readable only via direct get by token."
+    },
+    "/webProducts/{productId}": {
+      "schema": {
+        "$ref": "#/entities/WebProduct"
+      },
+      "description": "Storefront catalog products managed by the Website Control Panel, isolated per authenticated shop owner."
+    },
+    "/webOrders/{orderId}": {
+      "schema": {
+        "$ref": "#/entities/WebOrder"
+      },
+      "description": "Website customer orders synced from the storefront and linked to WhatsApp follow-up, isolated per authenticated shop owner."
     }
   }
 }

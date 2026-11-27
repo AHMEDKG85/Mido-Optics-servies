@@ -11,6 +11,7 @@ import {
   buildSinglePagePdfFromJpeg,
   buildSmsUrl,
   buildStageWhatsAppDispatch,
+  buildStorefrontSlug,
   buildTrackingUrl,
   buildWhatsAppUrl,
   calculateAutoTotal,
@@ -23,24 +24,34 @@ import {
   filterArchivedOrders,
   filterPriceItems,
   filterRepairs,
+  filterWebOrders,
+  filterWebProducts,
   formatEgyptianWhatsAppPhone,
   formatFirebaseAuthError,
   getPickupUrgency,
   inferExpectedPolarity,
+  mapWebOrderToCustomerInput,
+  mapWebProductToStorefrontLens,
+  mapWebProductToStorefrontProduct,
   normalizeCustomerRecord,
   normalizeLensPowerValue,
   normalizePriceCategory,
   normalizePriceItem,
   normalizeRepairRecord,
+  normalizeWebOrder,
+  normalizeWebProduct,
+  normalizeWebProductCategory,
   parseLensInventoryBackupJson,
   renderReadyPickupMessage,
   renderWhatsAppMessage,
   SAMPLE_REPAIRS,
   sanitizeFramePhoto,
   sanitizePickupDate,
+  sanitizeProductColors,
+  sanitizeWebsiteUrl,
   STARTER_PRICE_ITEMS,
 } from './optics';
-import type { CustomerRecord, PriceItem, RepairRecord } from '../types/optics';
+import type { CustomerRecord, PriceItem, RepairRecord, WebOrder, WebProduct } from '../types/optics';
 
 test('calculateRemaining computes total minus paid accurately', () => {
   assert.equal(calculateRemaining(1200, 500), 700);
@@ -761,6 +772,192 @@ test('buildReceiptShareSummary includes tracking link and totals for customers a
   assert.match(repSummary, /المتبقي: خالص/);
   assert.match(repSummary, /https:\/\/mido-optics\.web\.app\/#rtrack-rtok1122/);
 });
+
+test('normalizeWebProduct, sanitizeProductColors, sanitizeWebsiteUrl, and filterWebProducts support all 5 storefront categories and availability state', () => {
+  assert.equal(normalizeWebProductCategory('medical_glasses'), 'medical_glasses');
+  assert.equal(normalizeWebProductCategory('sunglasses'), 'sunglasses');
+  assert.equal(normalizeWebProductCategory('lenses'), 'lenses');
+  assert.equal(normalizeWebProductCategory('contact_lenses'), 'contact_lenses');
+  assert.equal(normalizeWebProductCategory('accessories'), 'accessories');
+  assert.equal(normalizeWebProductCategory('other'), 'medical_glasses');
+
+  assert.deepEqual(sanitizeProductColors(['أسود', 'ذهبي', 'أسود', '  فضي  ']), [
+    'أسود',
+    'ذهبي',
+    'فضي',
+  ]);
+  assert.deepEqual(sanitizeProductColors('أزرق، بني | شفاف'), ['أزرق', 'بني', 'شفاف']);
+
+  assert.equal(sanitizeWebsiteUrl('https://mido-store.com/ '), 'https://mido-store.com/');
+  assert.equal(sanitizeWebsiteUrl('javascript:alert(1)'), '');
+
+  const normalized = normalizeWebProduct({
+    id: 'wp item 1',
+    name: 'نظارة تيتانيوم أصلية',
+    category: 'medical_glasses',
+    price: 1450,
+    colors: ['أسود', 'ذهبي'],
+    available: false,
+    notes: 'إطار خفيف',
+    createdAtMs: 1000,
+    updatedAtMs: 2000,
+  });
+  assert.ok(normalized);
+  assert.equal(normalized.id, 'wp_item_1');
+  assert.equal(normalized.available, false);
+  assert.deepEqual(normalized.colors, ['أسود', 'ذهبي']);
+
+  const products: WebProduct[] = [
+    normalized,
+    {
+      id: 'wp_sun_2',
+      name: 'راي بان بولاريزد',
+      category: 'sunglasses',
+      price: 1900,
+      colors: ['بني', 'هافان'],
+      available: true,
+      notes: 'حماية UV400',
+      photo: '',
+      createdAtMs: 2000,
+      updatedAtMs: 3000,
+    },
+    {
+      id: 'wp_acc_3',
+      name: 'جراب جلد فاخر',
+      category: 'accessories',
+      price: 120,
+      colors: ['أسود'],
+      available: true,
+      notes: '',
+      photo: '',
+      createdAtMs: 2500,
+      updatedAtMs: 4000,
+    },
+  ];
+
+  assert.equal(filterWebProducts(products, 'all', 'unavailable').length, 1);
+  assert.equal(filterWebProducts(products, 'all', 'available').length, 2);
+  assert.equal(filterWebProducts(products, 'sunglasses', 'all').length, 1);
+  assert.equal(filterWebProducts(products, 'all', 'all', 'هافان')[0]?.id, 'wp_sun_2');
+  assert.equal(filterWebProducts(products, 'all', 'all', '')[0]?.id, 'wp_acc_3');
+});
+
+test('mapWebProductToStorefrontProduct and mapWebProductToStorefrontLens produce valid storefront schemas including unavailable stock=0', () => {
+  const unavailableGlasses: WebProduct = {
+    id: 'wp_176400_med1',
+    name: 'نظارة تيتانيوم دائرية',
+    category: 'medical_glasses',
+    price: 1350,
+    colors: ['أسود', 'ذهبي'],
+    available: false,
+    notes: 'إطار خفيف الوزن',
+    photo: '',
+    createdAtMs: 1000,
+    updatedAtMs: 2000,
+  };
+
+  const mappedProd = mapWebProductToStorefrontProduct(unavailableGlasses);
+  assert.equal(mappedProd.category, 'prescription');
+  assert.equal(mappedProd.slug, buildStorefrontSlug('wp_176400_med1'));
+  assert.equal(mappedProd.published, true);
+  assert.equal(mappedProd.allowPreorder, false);
+  assert.equal(mappedProd.variants.length, 2);
+  assert.equal(mappedProd.variants[0].stock, 0);
+  assert.equal(mappedProd.variants[0].colorHex, '#111827');
+  assert.equal(mappedProd.variants[1].colorHex, '#c9a24b');
+
+  const activeLens: WebProduct = {
+    id: 'wp_lens_99',
+    name: 'عدسات بلو كت ألماني',
+    category: 'lenses',
+    price: 550,
+    colors: [],
+    available: true,
+    notes: 'حماية الشاشات • ضد الانعكاس',
+    photo: 'data:image/jpeg;base64,/9j/4AAQSkZJRg==',
+    createdAtMs: 1000,
+    updatedAtMs: 2000,
+  };
+  const mappedLens = mapWebProductToStorefrontLens(activeLens);
+  assert.equal(mappedLens.published, true);
+  assert.equal(mappedLens.price, 550);
+  assert.deepEqual(mappedLens.details, ['حماية الشاشات', 'ضد الانعكاس']);
+  assert.ok(!mappedLens.imageUrl.startsWith('data:'));
+});
+
+test('normalizeWebOrder, filterWebOrders, and mapWebOrderToCustomerInput preserve storefront items and Rx specs', () => {
+  const rawOrder = {
+    orderCode: 'MDO-2045',
+    invoiceNumber: 'INV-2045',
+    orderType: 'standard',
+    customerName: 'طارق جمال الدين',
+    customerPhone: '01099881122',
+    customerAddress: 'مدينة نصر، القاهرة',
+    notes: 'التواصل قبل المندوب',
+    items: [
+      {
+        id: 1,
+        productId: 12,
+        productSlug: 'titan-01',
+        productName: 'نظارة تيتانيوم',
+        category: 'prescription',
+        colorName: 'أسود',
+        colorHex: '#111827',
+        framePrice: 950,
+        lensName: 'Blue Cut 1.56',
+        lensPrice: 450,
+        quantity: 1,
+      },
+    ],
+    prescription: {
+      mode: 'manual',
+      od: { sph: '-1.50', cyl: '-0.50', axis: '90', add: '+1.50' },
+      os: { sph: '-1.75', cyl: '-0.25', axis: '85', add: '+1.50' },
+      ipd: '63',
+    },
+    frameSubtotal: 950,
+    lensSubtotal: 450,
+    total: 1400,
+    status: 'pending',
+    createdAt: { seconds: 1764200000 },
+  };
+
+  const normalized = normalizeWebOrder(rawOrder, 'storefront_firebase');
+  assert.ok(normalized);
+  assert.equal(normalized.id, 'wo_MDO-2045');
+  assert.equal(normalized.source, 'storefront_firebase');
+  assert.equal(normalized.createdAtMs, 1764200000000);
+  assert.equal(normalized.items.length, 1);
+  assert.equal(normalized.prescription?.od.sph, '-1.50');
+
+  const custInput = mapWebOrderToCustomerInput(normalized);
+  assert.equal(custInput.name, 'طارق جمال الدين');
+  assert.equal(custInput.phone, '01099881122');
+  assert.equal(custInput.frame, 'نظارة تيتانيوم (أسود)');
+  assert.equal(custInput.lens, 'Blue Cut 1.56');
+  assert.equal(custInput.framePrice, 950);
+  assert.equal(custInput.lensPrice, 450);
+  assert.equal(custInput.total, 1400);
+  assert.deepEqual(custInput.r, ['-1.50', '-0.50', '90']);
+  assert.deepEqual(custInput.l, ['-1.75', '-0.25', '85']);
+  assert.equal(custInput.add, '+1.50');
+  assert.equal(custInput.usageType, 'reading');
+
+  const secondOrder: WebOrder = {
+    ...normalized,
+    id: 'wo_MDO-2046',
+    orderCode: 'MDO-2046',
+    customerName: 'نهى السيد',
+    status: 'confirmed',
+    createdAtMs: 1764300000000,
+  };
+
+  assert.equal(filterWebOrders([normalized, secondOrder], 'pending').length, 1);
+  assert.equal(filterWebOrders([normalized, secondOrder], 'all', 'نهى')[0]?.orderCode, 'MDO-2046');
+  assert.equal(filterWebOrders([normalized, secondOrder], 'all', '')[0]?.orderCode, 'MDO-2046');
+});
+
+
 
 
 

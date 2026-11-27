@@ -13,34 +13,66 @@ import {
   where,
   writeBatch,
 } from 'firebase/firestore';
-import { auth, db, handleFirestoreError, OperationType } from '../lib/firebase';
+import {
+  auth,
+  db,
+  handleFirestoreError,
+  OperationType,
+} from '../lib/firebase';
+import {
+  deleteStorefrontCatalogItem,
+  fetchPublicStorefrontCatalog,
+  fetchStorefrontOrdersOnce,
+  onStorefrontAuthChanged,
+  signInStorefrontAdmin,
+  signOutStorefrontAdmin,
+  subscribeStorefrontOrders,
+  updateStorefrontOrderStatus,
+  upsertStorefrontCatalogItem,
+} from '../lib/storefrontFirebase';
 import {
   CustomerRecord,
   DEFAULT_WA_TEMPLATE,
   PendingPriceSyncOp,
   PendingRepairSyncOp,
   PendingSyncOp,
+  PendingWebOrderSyncOp,
+  PendingWebProductSyncOp,
   PriceItem,
   PriceItemCategory,
   RepairRecord,
   ShopSettings,
   SyncState,
   UsageType,
+  WebOrder,
+  WebOrderStatus,
+  WebProduct,
+  WebProductCategory,
 } from '../types/optics';
 import {
   advanceHist,
   applyCustomerDeliverySettlement,
   applyRepairDeliverySettlement,
+  buildStorefrontSlug,
   clampNumber,
+  DEFAULT_STOREFRONT_WEBSITE_URL,
   generateCustomerId,
   generatePriceItemId,
   generateRepairId,
   generateToken,
+  generateWebProductId,
+  mapWebOrderToCustomerInput,
+  mapWebProductToStorefrontLens,
+  mapWebProductToStorefrontProduct,
   normalizeCustomerRecord,
   normalizePriceCategory,
   normalizePriceItem,
   normalizeRepairRecord,
   normalizeUsageType,
+  normalizeWebOrder,
+  normalizeWebOrderStatus,
+  normalizeWebProduct,
+  normalizeWebProductCategory,
   SAMPLE_CUSTOMERS,
   SAMPLE_REPAIRS,
   sanitizeAddPower,
@@ -48,7 +80,9 @@ import {
   sanitizeFramePhoto,
   sanitizeId,
   sanitizePickupDate,
+  sanitizeProductColors,
   sanitizeToken,
+  sanitizeWebsiteUrl,
   STARTER_PRICE_ITEMS,
 } from '../utils/optics';
 import { useOnlineStatus } from './useOnlineStatus';
@@ -60,6 +94,10 @@ const STORAGE_PRICES_KEY = 'mido_prices_v1';
 const STORAGE_PENDING_PRICES_KEY = 'mido_pending_price_ops_v1';
 const STORAGE_REPAIRS_KEY = 'mido_repairs_v1';
 const STORAGE_PENDING_REPAIRS_KEY = 'mido_pending_repair_ops_v1';
+const STORAGE_WEB_PRODUCTS_KEY = 'mido_web_products_v1';
+const STORAGE_PENDING_WEB_PRODUCTS_KEY = 'mido_pending_web_product_ops_v1';
+const STORAGE_WEB_ORDERS_KEY = 'mido_web_orders_v1';
+const STORAGE_PENDING_WEB_ORDERS_KEY = 'mido_pending_web_order_ops_v1';
 const STORAGE_SETTINGS_KEY = 'mido_settings_v1';
 
 const DEFAULT_SETTINGS: ShopSettings = {
@@ -67,6 +105,8 @@ const DEFAULT_SETTINGS: ShopSettings = {
   autoWhatsApp: true,
   waTemplate: DEFAULT_WA_TEMPLATE,
   publicBaseUrl: '',
+  websiteUrl: DEFAULT_STOREFRONT_WEBSITE_URL,
+  autoTransferWebOrdersToWhatsApp: true,
 };
 
 function readLocalCustomers(): CustomerRecord[] {
@@ -118,11 +158,17 @@ function readLocalSettings(): ShopSettings {
     const raw = localStorage.getItem(STORAGE_SETTINGS_KEY);
     if (!raw) return DEFAULT_SETTINGS;
     const parsed = JSON.parse(raw);
+    const savedUrl = sanitizeWebsiteUrl(parsed.websiteUrl);
     return {
       shopName: String(parsed.shopName || 'Mido Optics').slice(0, 80),
       autoWhatsApp: typeof parsed.autoWhatsApp === 'boolean' ? parsed.autoWhatsApp : true,
       waTemplate: String(parsed.waTemplate || DEFAULT_WA_TEMPLATE).slice(0, 600),
       publicBaseUrl: String(parsed.publicBaseUrl || '').trim().slice(0, 200),
+      websiteUrl: savedUrl || DEFAULT_STOREFRONT_WEBSITE_URL,
+      autoTransferWebOrdersToWhatsApp:
+        typeof parsed.autoTransferWebOrdersToWhatsApp === 'boolean'
+          ? parsed.autoTransferWebOrdersToWhatsApp
+          : true,
     };
   } catch {
     return DEFAULT_SETTINGS;
@@ -221,6 +267,90 @@ function writePendingRepairOps(ops: PendingRepairSyncOp[]): void {
   }
 }
 
+function readLocalWebProducts(): WebProduct[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_WEB_PRODUCTS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map(normalizeWebProduct)
+      .filter((x): x is WebProduct => x !== null)
+      .sort((a, b) => b.updatedAtMs - a.updatedAtMs);
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalWebProducts(list: WebProduct[]): void {
+  try {
+    localStorage.setItem(STORAGE_WEB_PRODUCTS_KEY, JSON.stringify(list));
+  } catch {
+    // Ignore storage quota errors gracefully
+  }
+}
+
+function readPendingWebProductOps(): PendingWebProductSyncOp[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_PENDING_WEB_PRODUCTS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writePendingWebProductOps(ops: PendingWebProductSyncOp[]): void {
+  try {
+    localStorage.setItem(STORAGE_PENDING_WEB_PRODUCTS_KEY, JSON.stringify(ops));
+  } catch {
+    // Ignore storage quota errors gracefully
+  }
+}
+
+function readLocalWebOrders(): WebOrder[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_WEB_ORDERS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item) => normalizeWebOrder(item, 'webhook'))
+      .filter((x): x is WebOrder => x !== null)
+      .sort((a, b) => b.createdAtMs - a.createdAtMs);
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalWebOrders(list: WebOrder[]): void {
+  try {
+    localStorage.setItem(STORAGE_WEB_ORDERS_KEY, JSON.stringify(list));
+  } catch {
+    // Ignore storage quota errors gracefully
+  }
+}
+
+function readPendingWebOrderOps(): PendingWebOrderSyncOp[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_PENDING_WEB_ORDERS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writePendingWebOrderOps(ops: PendingWebOrderSyncOp[]): void {
+  try {
+    localStorage.setItem(STORAGE_PENDING_WEB_ORDERS_KEY, JSON.stringify(ops));
+  } catch {
+    // Ignore storage quota errors gracefully
+  }
+}
+
 export interface CustomerInput {
   id?: string;
   name: string;
@@ -261,6 +391,17 @@ export interface RepairInput {
   pickupDate: string;
 }
 
+export interface WebProductInput {
+  id?: string;
+  name: string;
+  category: WebProductCategory;
+  price: number;
+  colors: string[];
+  available: boolean;
+  notes?: string;
+  photo?: string;
+}
+
 export function useOpticsStore() {
   const isOnline = useOnlineStatus();
   const [user, setUser] = useState<User | null>(null);
@@ -275,13 +416,34 @@ export function useOpticsStore() {
   const [pendingRepairOps, setPendingRepairOps] = useState<PendingRepairSyncOp[]>(() =>
     readPendingRepairOps()
   );
+  const [webProducts, setWebProducts] = useState<WebProduct[]>(() => readLocalWebProducts());
+  const [pendingWebProductOps, setPendingWebProductOps] = useState<PendingWebProductSyncOp[]>(() =>
+    readPendingWebProductOps()
+  );
+  const [webOrders, setWebOrders] = useState<WebOrder[]>(() => readLocalWebOrders());
+  const [pendingWebOrderOps, setPendingWebOrderOps] = useState<PendingWebOrderSyncOp[]>(() =>
+    readPendingWebOrderOps()
+  );
   const [settings, setSettings] = useState<ShopSettings>(() => readLocalSettings());
   const [firestorePendingWrites, setFirestorePendingWrites] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
 
+  // Storefront integration live status
+  const [storefrontUser, setStorefrontUser] = useState<User | null>(null);
+  const [storefrontSyncStatus, setStorefrontSyncStatus] = useState<{
+    state: 'idle' | 'syncing' | 'ok' | 'partial' | 'error';
+    message: string;
+    publicProductsCount?: number;
+    publicLensesCount?: number;
+    lastSyncedAt?: number;
+  }>({ state: 'idle', message: '' });
+
   const knownServerCustomerIds = useRef<Set<string>>(new Set());
   const knownServerPriceIds = useRef<Set<string>>(new Set());
   const knownServerRepairIds = useRef<Set<string>>(new Set());
+  const knownServerWebProductIds = useRef<Set<string>>(new Set());
+  const knownServerWebOrderIds = useRef<Set<string>>(new Set());
+  const autoConvertedOrderIds = useRef<Set<string>>(new Set());
   const isFlushing = useRef(false);
 
   // Persist local mirror whenever collections/pendingOps/settings change
@@ -310,16 +472,38 @@ export function useOpticsStore() {
   }, [pendingRepairOps]);
 
   useEffect(() => {
+    writeLocalWebProducts(webProducts);
+  }, [webProducts]);
+
+  useEffect(() => {
+    writePendingWebProductOps(pendingWebProductOps);
+  }, [pendingWebProductOps]);
+
+  useEffect(() => {
+    writeLocalWebOrders(webOrders);
+  }, [webOrders]);
+
+  useEffect(() => {
+    writePendingWebOrderOps(pendingWebOrderOps);
+  }, [pendingWebOrderOps]);
+
+  useEffect(() => {
     writeLocalSettings(settings);
   }, [settings]);
 
-  // Watch Firebase auth state
+  // Watch primary Firebase auth state & secondary Storefront Firebase auth state
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (nextUser) => {
+    const unsubMain = onAuthStateChanged(auth, (nextUser) => {
       setUser(nextUser);
       setAuthReady(true);
     });
-    return unsub;
+    const unsubStorefront = onStorefrontAuthChanged((nextSfUser) => {
+      setStorefrontUser(nextSfUser);
+    });
+    return () => {
+      unsubMain();
+      unsubStorefront();
+    };
   }, []);
 
   const commitUpsertToFirestore = useCallback(
@@ -724,13 +908,161 @@ export function useOpticsStore() {
     }
   }, []);
 
+  const commitWebProductUpsertToFirestore = useCallback(
+    async (product: WebProduct, uid: string) => {
+      const id = sanitizeId(product.id, 'wp');
+      const productRef = doc(db, 'webProducts', id);
+
+      let existsOnServer = knownServerWebProductIds.current.has(id);
+      if (!existsOnServer) {
+        try {
+          const snap = await getDoc(productRef);
+          existsOnServer = snap.exists();
+          if (existsOnServer) {
+            knownServerWebProductIds.current.add(id);
+          }
+        } catch {
+          existsOnServer = false;
+        }
+      }
+
+      const safeName = product.name.trim().slice(0, 120) || 'منتج';
+      const safeCategory = normalizeWebProductCategory(product.category);
+      const safePrice = clampNumber(product.price);
+      const safeColors = sanitizeProductColors(product.colors);
+      const safeAvailable = Boolean(product.available);
+      const safeNotes = (product.notes || '').trim().slice(0, 240);
+      const safePhoto = sanitizeFramePhoto(product.photo);
+      const safeCreatedAtMs = Math.max(0, Math.trunc(product.createdAtMs || Date.now()));
+      const safeUpdatedAtMs = Math.max(0, Math.trunc(product.updatedAtMs || Date.now()));
+
+      try {
+        if (existsOnServer) {
+          await updateDoc(productRef, {
+            name: safeName,
+            category: safeCategory,
+            price: safePrice,
+            colors: safeColors,
+            available: safeAvailable,
+            notes: safeNotes,
+            photo: safePhoto,
+            updatedAtMs: safeUpdatedAtMs,
+            updatedAt: serverTimestamp(),
+          });
+        } else {
+          await setDoc(productRef, {
+            id,
+            ownerId: uid,
+            name: safeName,
+            category: safeCategory,
+            price: safePrice,
+            colors: safeColors,
+            available: safeAvailable,
+            notes: safeNotes,
+            photo: safePhoto,
+            createdAtMs: safeCreatedAtMs,
+            updatedAtMs: safeUpdatedAtMs,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        }
+        knownServerWebProductIds.current.add(id);
+      } catch (err) {
+        handleFirestoreError(err, OperationType.WRITE, `webProducts/${id}`);
+      }
+    },
+    []
+  );
+
+  const commitWebProductDeleteToFirestore = useCallback(async (productId: string) => {
+    const id = sanitizeId(productId, 'wp');
+    try {
+      await deleteDoc(doc(db, 'webProducts', id));
+      knownServerWebProductIds.current.delete(id);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `webProducts/${id}`);
+    }
+  }, []);
+
+  const commitWebOrderUpsertToFirestore = useCallback(
+    async (order: WebOrder, uid: string) => {
+      const id = sanitizeId(order.id, 'wo');
+      const orderRef = doc(db, 'webOrders', id);
+
+      let existsOnServer = knownServerWebOrderIds.current.has(id);
+      if (!existsOnServer) {
+        try {
+          const snap = await getDoc(orderRef);
+          existsOnServer = snap.exists();
+          if (existsOnServer) {
+            knownServerWebOrderIds.current.add(id);
+          }
+        } catch {
+          existsOnServer = false;
+        }
+      }
+
+      const payload = {
+        orderCode: String(order.orderCode || id).slice(0, 64),
+        invoiceNumber: String(order.invoiceNumber || order.orderCode || id).slice(0, 64),
+        orderType: order.orderType === 'preorder' ? 'preorder' : 'standard',
+        customerName: order.customerName.trim().slice(0, 120) || 'عميل موقع',
+        customerPhone: (order.customerPhone || '').trim().slice(0, 30),
+        customerAddress: (order.customerAddress || '').trim().slice(0, 240),
+        notes: (order.notes || '').trim().slice(0, 400),
+        items: (order.items || []).slice(0, 50),
+        prescription: order.prescription ?? null,
+        frameSubtotal: clampNumber(order.frameSubtotal),
+        lensSubtotal: clampNumber(order.lensSubtotal),
+        total: clampNumber(order.total),
+        status: normalizeWebOrderStatus(order.status),
+        source: order.source || 'webhook',
+        ...(order.convertedCustomerId
+          ? { convertedCustomerId: sanitizeId(order.convertedCustomerId, 'c') }
+          : {}),
+        updatedAtMs: Math.max(0, Math.trunc(order.updatedAtMs || Date.now())),
+        updatedAt: serverTimestamp(),
+      };
+
+      try {
+        if (existsOnServer) {
+          await updateDoc(orderRef, payload);
+        } else {
+          await setDoc(orderRef, {
+            id,
+            ownerId: uid,
+            ...payload,
+            createdAtMs: Math.max(0, Math.trunc(order.createdAtMs || Date.now())),
+            createdAt: serverTimestamp(),
+          });
+        }
+        knownServerWebOrderIds.current.add(id);
+      } catch (err) {
+        handleFirestoreError(err, OperationType.WRITE, `webOrders/${id}`);
+      }
+    },
+    []
+  );
+
+  const commitWebOrderDeleteToFirestore = useCallback(async (orderId: string) => {
+    const id = sanitizeId(orderId, 'wo');
+    try {
+      await deleteDoc(doc(db, 'webOrders', id));
+      knownServerWebOrderIds.current.delete(id);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `webOrders/${id}`);
+    }
+  }, []);
+
   // Flush queued offline/pre-login ops when authenticated & online
   const flushPendingOps = useCallback(async () => {
     if (!user || !user.emailVerified || !isOnline || isFlushing.current) return;
     if (
       pendingOps.length === 0 &&
       pendingPriceOps.length === 0 &&
-      pendingRepairOps.length === 0
+      pendingRepairOps.length === 0 &&
+      pendingWebProductOps.length === 0 &&
+      pendingWebOrderOps.length === 0
     ) {
       return;
     }
@@ -782,6 +1114,40 @@ export function useOpticsStore() {
         setPendingRepairOps((prev) => prev.filter((op) => !succeededRepairOpIds.has(op.id)));
       }
 
+      const webProductOpsToRun = [...pendingWebProductOps];
+      const succeededWebProductOpIds = new Set<string>();
+      for (const op of webProductOpsToRun) {
+        if (op.type === 'upsert' && op.product) {
+          await commitWebProductUpsertToFirestore(op.product, user.uid);
+          succeededWebProductOpIds.add(op.id);
+        } else if (op.type === 'delete') {
+          await commitWebProductDeleteToFirestore(op.productId);
+          succeededWebProductOpIds.add(op.id);
+        }
+      }
+      if (succeededWebProductOpIds.size > 0) {
+        setPendingWebProductOps((prev) =>
+          prev.filter((op) => !succeededWebProductOpIds.has(op.id))
+        );
+      }
+
+      const webOrderOpsToRun = [...pendingWebOrderOps];
+      const succeededWebOrderOpIds = new Set<string>();
+      for (const op of webOrderOpsToRun) {
+        if (op.type === 'upsert' && op.order) {
+          await commitWebOrderUpsertToFirestore(op.order, user.uid);
+          succeededWebOrderOpIds.add(op.id);
+        } else if (op.type === 'delete') {
+          await commitWebOrderDeleteToFirestore(op.orderId);
+          succeededWebOrderOpIds.add(op.id);
+        }
+      }
+      if (succeededWebOrderOpIds.size > 0) {
+        setPendingWebOrderOps((prev) =>
+          prev.filter((op) => !succeededWebOrderOpIds.has(op.id))
+        );
+      }
+
       setSyncError(null);
     } catch (err) {
       setSyncError(err instanceof Error ? err.message : 'تعذر المزامنة');
@@ -794,6 +1160,8 @@ export function useOpticsStore() {
     pendingOps,
     pendingPriceOps,
     pendingRepairOps,
+    pendingWebProductOps,
+    pendingWebOrderOps,
     settings.shopName,
     commitUpsertToFirestore,
     commitDeleteToFirestore,
@@ -801,6 +1169,10 @@ export function useOpticsStore() {
     commitPriceDeleteToFirestore,
     commitRepairUpsertToFirestore,
     commitRepairDeleteToFirestore,
+    commitWebProductUpsertToFirestore,
+    commitWebProductDeleteToFirestore,
+    commitWebOrderUpsertToFirestore,
+    commitWebOrderDeleteToFirestore,
   ]);
 
   useEffect(() => {
@@ -813,6 +1185,7 @@ export function useOpticsStore() {
       knownServerCustomerIds.current.clear();
       knownServerPriceIds.current.clear();
       knownServerRepairIds.current.clear();
+      knownServerWebProductIds.current.clear();
       setFirestorePendingWrites(false);
       return;
     }
@@ -907,11 +1280,17 @@ export function useOpticsStore() {
       (snap) => {
         if (snap.exists()) {
           const d = snap.data();
+          const savedUrl = sanitizeWebsiteUrl(d.websiteUrl);
           setSettings({
             shopName: String(d.shopName || 'Mido Optics').slice(0, 80),
             autoWhatsApp: typeof d.autoWhatsApp === 'boolean' ? d.autoWhatsApp : true,
             waTemplate: String(d.waTemplate || DEFAULT_WA_TEMPLATE).slice(0, 600),
             publicBaseUrl: String(d.publicBaseUrl || '').trim().slice(0, 200),
+            websiteUrl: savedUrl || DEFAULT_STOREFRONT_WEBSITE_URL,
+            autoTransferWebOrdersToWhatsApp:
+              typeof d.autoTransferWebOrdersToWhatsApp === 'boolean'
+                ? d.autoTransferWebOrdersToWhatsApp
+                : true,
           });
         }
       },
@@ -1084,11 +1463,175 @@ export function useOpticsStore() {
       }
     );
 
+    const webProductsQuery = query(
+      collection(db, 'webProducts'),
+      where('ownerId', '==', user.uid)
+    );
+    let isFirstWebProductSnapshot = true;
+
+    const unsubWebProducts = onSnapshot(
+      webProductsQuery,
+      { includeMetadataChanges: true },
+      (snapshot) => {
+        setSyncError(null);
+        const serverProducts: WebProduct[] = [];
+        const nextKnownProducts = new Set<string>();
+
+        for (const docSnap of snapshot.docs) {
+          const normalized = normalizeWebProduct(docSnap.data());
+          if (normalized) {
+            serverProducts.push(normalized);
+            nextKnownProducts.add(normalized.id);
+          }
+        }
+
+        knownServerWebProductIds.current = nextKnownProducts;
+
+        if (isFirstWebProductSnapshot && serverProducts.length === 0) {
+          const localOnlyProducts = readLocalWebProducts();
+          if (localOnlyProducts.length > 0) {
+            isFirstWebProductSnapshot = false;
+            setPendingWebProductOps((prev) => {
+              const existingIds = new Set(prev.map((p) => p.productId));
+              const additions: PendingWebProductSyncOp[] = localOnlyProducts
+                .filter((item) => !existingIds.has(item.id))
+                .map((item) => ({
+                  id: `migrate_wp_${item.id}_${Date.now()}`,
+                  type: 'upsert',
+                  productId: item.id,
+                  product: { ...item, ownerId: user.uid },
+                  queuedAt: Date.now(),
+                }));
+              return additions.length ? [...prev, ...additions] : prev;
+            });
+            return;
+          }
+        }
+        isFirstWebProductSnapshot = false;
+
+        const currentPendingProducts = readPendingWebProductOps();
+        const pendingDeletes = new Set(
+          currentPendingProducts.filter((op) => op.type === 'delete').map((op) => op.productId)
+        );
+        const pendingUpserts = new Map<string, WebProduct>();
+        for (const op of currentPendingProducts) {
+          if (op.type === 'upsert' && op.product) {
+            pendingUpserts.set(op.productId, op.product);
+          }
+        }
+
+        const mergedProducts = new Map<string, WebProduct>();
+        for (const item of serverProducts) {
+          if (!pendingDeletes.has(item.id)) {
+            mergedProducts.set(item.id, item);
+          }
+        }
+        for (const [id, item] of pendingUpserts.entries()) {
+          mergedProducts.set(id, item);
+        }
+
+        setWebProducts(
+          Array.from(mergedProducts.values()).sort((a, b) => b.updatedAtMs - a.updatedAtMs)
+        );
+      },
+      (err) => {
+        setSyncError(err.message);
+        try {
+          handleFirestoreError(err, OperationType.LIST, 'webProducts');
+        } catch {
+          // Structured error logged in handleFirestoreError; keep app running offline-first
+        }
+      }
+    );
+
+    const webOrdersQuery = query(
+      collection(db, 'webOrders'),
+      where('ownerId', '==', user.uid)
+    );
+    let isFirstWebOrderSnapshot = true;
+
+    const unsubWebOrders = onSnapshot(
+      webOrdersQuery,
+      { includeMetadataChanges: true },
+      (snapshot) => {
+        setSyncError(null);
+        const serverOrders: WebOrder[] = [];
+        const nextKnownOrders = new Set<string>();
+
+        for (const docSnap of snapshot.docs) {
+          const normalized = normalizeWebOrder(docSnap.data(), 'webhook');
+          if (normalized) {
+            serverOrders.push(normalized);
+            nextKnownOrders.add(normalized.id);
+          }
+        }
+
+        knownServerWebOrderIds.current = nextKnownOrders;
+
+        if (isFirstWebOrderSnapshot && serverOrders.length === 0) {
+          const localOnlyOrders = readLocalWebOrders();
+          if (localOnlyOrders.length > 0) {
+            isFirstWebOrderSnapshot = false;
+            setPendingWebOrderOps((prev) => {
+              const existingIds = new Set(prev.map((p) => p.orderId));
+              const additions: PendingWebOrderSyncOp[] = localOnlyOrders
+                .filter((item) => !existingIds.has(item.id))
+                .map((item) => ({
+                  id: `migrate_wo_${item.id}_${Date.now()}`,
+                  type: 'upsert',
+                  orderId: item.id,
+                  order: { ...item, ownerId: user.uid },
+                  queuedAt: Date.now(),
+                }));
+              return additions.length ? [...prev, ...additions] : prev;
+            });
+            return;
+          }
+        }
+        isFirstWebOrderSnapshot = false;
+
+        const currentPendingOrders = readPendingWebOrderOps();
+        const pendingDeletes = new Set(
+          currentPendingOrders.filter((op) => op.type === 'delete').map((op) => op.orderId)
+        );
+        const pendingUpserts = new Map<string, WebOrder>();
+        for (const op of currentPendingOrders) {
+          if (op.type === 'upsert' && op.order) {
+            pendingUpserts.set(op.orderId, op.order);
+          }
+        }
+
+        const mergedOrders = new Map<string, WebOrder>();
+        for (const item of serverOrders) {
+          if (!pendingDeletes.has(item.id)) {
+            mergedOrders.set(item.id, item);
+          }
+        }
+        for (const [id, item] of pendingUpserts.entries()) {
+          mergedOrders.set(id, item);
+        }
+
+        setWebOrders(
+          Array.from(mergedOrders.values()).sort((a, b) => b.createdAtMs - a.createdAtMs)
+        );
+      },
+      (err) => {
+        setSyncError(err.message);
+        try {
+          handleFirestoreError(err, OperationType.LIST, 'webOrders');
+        } catch {
+          // Structured error logged in handleFirestoreError; keep app running offline-first
+        }
+      }
+    );
+
     return () => {
       unsubCustomers();
       unsubSettings();
       unsubPrices();
       unsubRepairs();
+      unsubWebProducts();
+      unsubWebOrders();
     };
   }, [authReady, user]);
 
@@ -1288,6 +1831,11 @@ export function useOpticsStore() {
         shopName: String(patch.shopName ?? settings.shopName).slice(0, 80) || 'Mido Optics',
         waTemplate: String(patch.waTemplate ?? settings.waTemplate).slice(0, 600),
         publicBaseUrl: String(patch.publicBaseUrl ?? settings.publicBaseUrl).trim().slice(0, 200),
+        websiteUrl: sanitizeWebsiteUrl(patch.websiteUrl ?? settings.websiteUrl),
+        autoTransferWebOrdersToWhatsApp:
+          typeof patch.autoTransferWebOrdersToWhatsApp === 'boolean'
+            ? patch.autoTransferWebOrdersToWhatsApp
+            : settings.autoTransferWebOrdersToWhatsApp ?? true,
       };
       setSettings(next);
 
@@ -1295,29 +1843,29 @@ export function useOpticsStore() {
         const settingsRef = doc(db, 'settings', user.uid);
         try {
           const snap = await getDoc(settingsRef);
+          const payload = {
+            ownerId: user.uid,
+            shopName: next.shopName,
+            autoWhatsApp: next.autoWhatsApp,
+            waTemplate: next.waTemplate,
+            publicBaseUrl: next.publicBaseUrl,
+            websiteUrl: next.websiteUrl || '',
+            autoTransferWebOrdersToWhatsApp: Boolean(next.autoTransferWebOrdersToWhatsApp),
+            updatedAt: serverTimestamp(),
+          };
           if (snap.exists()) {
             await setDoc(
               settingsRef,
               {
-                ownerId: user.uid,
-                shopName: next.shopName,
-                autoWhatsApp: next.autoWhatsApp,
-                waTemplate: next.waTemplate,
-                publicBaseUrl: next.publicBaseUrl,
+                ...payload,
                 createdAt: snap.data().createdAt,
-                updatedAt: serverTimestamp(),
               },
               { merge: false }
             );
           } else {
             await setDoc(settingsRef, {
-              ownerId: user.uid,
-              shopName: next.shopName,
-              autoWhatsApp: next.autoWhatsApp,
-              waTemplate: next.waTemplate,
-              publicBaseUrl: next.publicBaseUrl,
+              ...payload,
               createdAt: serverTimestamp(),
-              updatedAt: serverTimestamp(),
             });
           }
         } catch (err) {
@@ -1622,8 +2170,633 @@ export function useOpticsStore() {
     return importRepairs(SAMPLE_REPAIRS);
   }, [importRepairs]);
 
+  const queueOrSyncWebProductUpsert = useCallback(
+    (product: WebProduct) => {
+      if (user && user.emailVerified) {
+        if (isOnline) {
+          void commitWebProductUpsertToFirestore(product, user.uid).catch((err) => {
+            setSyncError(err instanceof Error ? err.message : 'تعذر المزامنة');
+          });
+        } else {
+          void commitWebProductUpsertToFirestore(product, user.uid).catch(() => {});
+        }
+        return;
+      }
+
+      setPendingWebProductOps((prev) => [
+        ...prev.filter((op) => op.productId !== product.id),
+        {
+          id: `wp_op_${product.id}_${Date.now()}`,
+          type: 'upsert',
+          productId: product.id,
+          product,
+          queuedAt: Date.now(),
+        },
+      ]);
+    },
+    [user, isOnline, commitWebProductUpsertToFirestore]
+  );
+
+  const pushSingleProductToStorefront = useCallback(
+    async (product: WebProduct): Promise<{ synced: boolean; note: string }> => {
+      const targetUrl = sanitizeWebsiteUrl(settings.websiteUrl);
+      let firebaseOk = false;
+      let restOk = false;
+      let notes: string[] = [];
+
+      if (storefrontUser) {
+        try {
+          const sfRes = await upsertStorefrontCatalogItem(product);
+          if (sfRes.ok) {
+            firebaseOk = true;
+            if (sfRes.imageTrimmed) {
+              notes.push('تمت المزامنة مع الموقع (بدون الصورة المحلية الكبيرة)');
+            }
+          }
+        } catch (err) {
+          notes.push(
+            err instanceof Error
+              ? `تعذر تحديث قاعدة الموقع: ${err.message}`
+              : 'تعذر تحديث قاعدة بيانات الموقع'
+          );
+        }
+      }
+
+      if (targetUrl) {
+        try {
+          const isLens = product.category === 'lenses';
+          const payload = isLens
+            ? mapWebProductToStorefrontLens(product)
+            : mapWebProductToStorefrontProduct(product);
+          const slugId = isLens
+            ? buildStorefrontSlug(product.id, 'lens')
+            : buildStorefrontSlug(product.id, 'prod');
+          const res = await fetch('/api/storefront/proxy', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              websiteUrl: targetUrl,
+              path: isLens ? `/api/external/lenses/${slugId}` : `/api/external/products/${slugId}`,
+              method: 'PUT',
+              payload,
+            }),
+          });
+          if (res.ok) {
+            const data = (await res.json()) as { ok?: boolean; upstreamStatus?: number };
+            if (data.ok) restOk = true;
+          }
+        } catch {
+          // ignore network errors silently when REST bridge is unavailable
+        }
+      }
+
+      if (firebaseOk || restOk) {
+        const msg =
+          notes[0] || `تمت مزامنة «${product.name}» تلقائياً مع الموقع`;
+        setStorefrontSyncStatus((prev) => ({
+          ...prev,
+          state: 'ok',
+          message: msg,
+          lastSyncedAt: Date.now(),
+        }));
+        return { synced: true, note: msg };
+      }
+
+      if (!storefrontUser) {
+        const msg = 'اربط حساب إدارة المتجر من أعلى الصفحة لدفع التحديثات مباشرة لموقع الويب';
+        setStorefrontSyncStatus((prev) => ({
+          ...prev,
+          state: 'partial',
+          message: msg,
+        }));
+        return { synced: false, note: msg };
+      }
+
+      const fallbackMsg = notes[0] || 'تعذر الوصول الفوري لموقع الويب';
+      setStorefrontSyncStatus((prev) => ({
+        ...prev,
+        state: 'error',
+        message: fallbackMsg,
+      }));
+      return { synced: false, note: fallbackMsg };
+    },
+    [settings.websiteUrl, storefrontUser]
+  );
+
+  const saveWebProduct = useCallback(
+    (input: WebProductInput): { product: WebProduct; isNew: boolean } => {
+      const existing = input.id ? webProducts.find((p) => p.id === input.id) : undefined;
+      const isNew = !existing;
+      const nowMs = Date.now();
+
+      const product: WebProduct = existing
+        ? {
+            ...existing,
+            name: input.name.trim().slice(0, 120),
+            category: normalizeWebProductCategory(input.category),
+            price: clampNumber(input.price),
+            colors: sanitizeProductColors(input.colors),
+            available: Boolean(input.available),
+            notes: (input.notes || '').trim().slice(0, 240),
+            photo: sanitizeFramePhoto(input.photo),
+            updatedAtMs: nowMs,
+          }
+        : {
+            id: generateWebProductId(),
+            ownerId: user?.uid,
+            name: input.name.trim().slice(0, 120),
+            category: normalizeWebProductCategory(input.category),
+            price: clampNumber(input.price),
+            colors: sanitizeProductColors(input.colors),
+            available: Boolean(input.available),
+            notes: (input.notes || '').trim().slice(0, 240),
+            photo: sanitizeFramePhoto(input.photo),
+            createdAtMs: nowMs,
+            updatedAtMs: nowMs,
+          };
+
+      setWebProducts((prev) => {
+        if (existing) {
+          return prev
+            .map((p) => (p.id === product.id ? product : p))
+            .sort((a, b) => b.updatedAtMs - a.updatedAtMs);
+        }
+        return [product, ...prev];
+      });
+
+      queueOrSyncWebProductUpsert(product);
+      void pushSingleProductToStorefront(product);
+      return { product, isNew };
+    },
+    [webProducts, user, queueOrSyncWebProductUpsert, pushSingleProductToStorefront]
+  );
+
+  const toggleWebProductAvailability = useCallback(
+    (productId: string, nextAvailable?: boolean): WebProduct | null => {
+      const target = webProducts.find((p) => p.id === productId);
+      if (!target) return null;
+      const next = typeof nextAvailable === 'boolean' ? nextAvailable : !target.available;
+      const nowMs = Date.now();
+      const updated: WebProduct = {
+        ...target,
+        available: next,
+        updatedAtMs: nowMs,
+      };
+
+      setWebProducts((prev) =>
+        prev
+          .map((p) => (p.id === productId ? updated : p))
+          .sort((a, b) => b.updatedAtMs - a.updatedAtMs)
+      );
+
+      if (user && user.emailVerified && knownServerWebProductIds.current.has(sanitizeId(productId, 'wp'))) {
+        const id = sanitizeId(productId, 'wp');
+        void updateDoc(doc(db, 'webProducts', id), {
+          available: next,
+          updatedAtMs: nowMs,
+          updatedAt: serverTimestamp(),
+        }).catch((err) => {
+          try {
+            handleFirestoreError(err, OperationType.UPDATE, `webProducts/${id}`);
+          } catch {
+            // fallback error state
+          }
+          setSyncError(err instanceof Error ? err.message : 'تعذر تحديث حالة المنتج');
+        });
+      } else {
+        queueOrSyncWebProductUpsert(updated);
+      }
+
+      void pushSingleProductToStorefront(updated);
+      return updated;
+    },
+    [webProducts, user, queueOrSyncWebProductUpsert, pushSingleProductToStorefront]
+  );
+
+  const deleteWebProduct = useCallback(
+    (productId: string) => {
+      const target = webProducts.find((p) => p.id === productId);
+      setWebProducts((prev) => prev.filter((p) => p.id !== productId));
+
+      if (user && user.emailVerified) {
+        void commitWebProductDeleteToFirestore(productId).catch((err) => {
+          setSyncError(err instanceof Error ? err.message : 'تعذر الحذف من السحابة');
+        });
+      } else {
+        setPendingWebProductOps((prev) => [
+          ...prev.filter((op) => op.productId !== productId),
+          {
+            id: `del_wp_${productId}_${Date.now()}`,
+            type: 'delete',
+            productId,
+            queuedAt: Date.now(),
+          },
+        ]);
+      }
+
+      if (target && storefrontUser) {
+        void deleteStorefrontCatalogItem(target).catch(() => {});
+      }
+    },
+    [webProducts, user, storefrontUser, commitWebProductDeleteToFirestore]
+  );
+
+  const syncAllProductsToStorefront = useCallback(async (): Promise<{
+    synced: number;
+    total: number;
+    message: string;
+  }> => {
+    if (!storefrontUser) {
+      const msg = 'سجّل الدخول أولاً بحساب إدارة الموقع للمزامنة المباشرة مع المتجر';
+      setStorefrontSyncStatus({ state: 'partial', message: msg });
+      return { synced: 0, total: webProducts.length, message: msg };
+    }
+    setStorefrontSyncStatus((prev) => ({
+      ...prev,
+      state: 'syncing',
+      message: 'جاري مزامنة جميع المنتجات والعدسات مع الموقع...',
+    }));
+    let synced = 0;
+    for (const product of webProducts) {
+      const res = await pushSingleProductToStorefront(product);
+      if (res.synced) synced += 1;
+    }
+    try {
+      const publicCounts = await fetchPublicStorefrontCatalog();
+      const msg = `تمت مزامنة ${synced} من ${webProducts.length} منتج مع الموقع بنجاح`;
+      setStorefrontSyncStatus({
+        state: synced === webProducts.length ? 'ok' : 'partial',
+        message: msg,
+        publicProductsCount: publicCounts.publishedProductsCount,
+        publicLensesCount: publicCounts.publishedLensesCount,
+        lastSyncedAt: Date.now(),
+      });
+      return { synced, total: webProducts.length, message: msg };
+    } catch {
+      const msg = `تمت مزامنة ${synced} من ${webProducts.length} منتج مع الموقع`;
+      setStorefrontSyncStatus({ state: 'ok', message: msg, lastSyncedAt: Date.now() });
+      return { synced, total: webProducts.length, message: msg };
+    }
+  }, [storefrontUser, webProducts, pushSingleProductToStorefront]);
+
+  // WebOrders CRUD + Auto-ingestion from Storefront Firebase & Webhook server + Transfer to WhatsApp Follow-Up
+  const queueOrSyncWebOrderUpsert = useCallback(
+    (order: WebOrder) => {
+      if (user && user.emailVerified) {
+        if (isOnline) {
+          void commitWebOrderUpsertToFirestore(order, user.uid).catch((err) => {
+            setSyncError(err instanceof Error ? err.message : 'تعذر مزامنة طلبات الموقع');
+          });
+        } else {
+          void commitWebOrderUpsertToFirestore(order, user.uid).catch(() => {});
+        }
+        return;
+      }
+
+      setPendingWebOrderOps((prev) => [
+        ...prev.filter((op) => op.orderId !== order.id),
+        {
+          id: `wo_op_${order.id}_${Date.now()}`,
+          type: 'upsert',
+          orderId: order.id,
+          order,
+          queuedAt: Date.now(),
+        },
+      ]);
+    },
+    [user, isOnline, commitWebOrderUpsertToFirestore]
+  );
+
+  const upsertIncomingWebOrders = useCallback(
+    (incoming: WebOrder[]): number => {
+      if (!incoming.length) return 0;
+
+      const normalizedIncoming = incoming
+        .map((item) => normalizeWebOrder(item, item.source || 'webhook'))
+        .filter((x): x is WebOrder => x !== null);
+      if (normalizedIncoming.length === 0) return 0;
+
+      const existingMap = new Map<string, WebOrder>(webOrders.map((o) => [o.id, o]));
+      const nextToPersist: WebOrder[] = [];
+
+      for (const order of normalizedIncoming) {
+        const prev = existingMap.get(order.id);
+        let merged: WebOrder = prev
+          ? {
+              ...order,
+              ownerId: prev.ownerId ?? user?.uid,
+              convertedCustomerId: prev.convertedCustomerId || order.convertedCustomerId,
+              // Preserve local status progression if locally modified more recently
+              status:
+                prev.updatedAtMs > order.updatedAtMs ? prev.status : order.status,
+              updatedAtMs: Math.max(prev.updatedAtMs, order.updatedAtMs),
+            }
+          : {
+              ...order,
+              ownerId: user?.uid,
+            };
+
+        if (
+          settings.autoTransferWebOrdersToWhatsApp !== false &&
+          !merged.convertedCustomerId &&
+          !autoConvertedOrderIds.current.has(merged.id) &&
+          merged.status !== 'cancelled'
+        ) {
+          autoConvertedOrderIds.current.add(merged.id);
+          const { record } = saveCustomer(mapWebOrderToCustomerInput(merged));
+          merged = {
+            ...merged,
+            convertedCustomerId: record.id,
+            updatedAtMs: Date.now(),
+          };
+        }
+
+        const changed =
+          !prev ||
+          prev.status !== merged.status ||
+          prev.total !== merged.total ||
+          prev.convertedCustomerId !== merged.convertedCustomerId ||
+          prev.items.length !== merged.items.length;
+
+        if (changed) {
+          nextToPersist.push(merged);
+        }
+        existingMap.set(merged.id, merged);
+      }
+
+      if (nextToPersist.length > 0) {
+        setWebOrders(
+          Array.from(existingMap.values()).sort((a, b) => b.createdAtMs - a.createdAtMs)
+        );
+        for (const item of nextToPersist) {
+          queueOrSyncWebOrderUpsert(item);
+        }
+      }
+
+      return nextToPersist.length;
+    },
+    [
+      webOrders,
+      user?.uid,
+      settings.autoTransferWebOrdersToWhatsApp,
+      saveCustomer,
+      queueOrSyncWebOrderUpsert,
+    ]
+  );
+
+  const convertWebOrderToCustomer = useCallback(
+    (orderId: string): { customer: CustomerRecord; isNew: boolean } | null => {
+      const target = webOrders.find((o) => o.id === orderId);
+      if (!target) return null;
+
+      if (target.convertedCustomerId) {
+        const existingCust = customers.find((c) => c.id === target.convertedCustomerId);
+        if (existingCust) {
+          return { customer: existingCust, isNew: false };
+        }
+      }
+
+      autoConvertedOrderIds.current.add(target.id);
+      const { record } = saveCustomer(mapWebOrderToCustomerInput(target));
+      const updatedOrder: WebOrder = {
+        ...target,
+        convertedCustomerId: record.id,
+        status: target.status === 'pending' ? 'confirmed' : target.status,
+        updatedAtMs: Date.now(),
+      };
+      setWebOrders((prev) =>
+        prev.map((o) => (o.id === target.id ? updatedOrder : o))
+      );
+      queueOrSyncWebOrderUpsert(updatedOrder);
+
+      if (storefrontUser && target.status === 'pending') {
+        void updateStorefrontOrderStatus(target.orderCode, 'confirmed').catch(() => {});
+      }
+
+      return { customer: record, isNew: true };
+    },
+    [webOrders, customers, saveCustomer, queueOrSyncWebOrderUpsert, storefrontUser]
+  );
+
+  const updateWebOrderStatus = useCallback(
+    (orderId: string, nextStatus: WebOrderStatus): WebOrder | null => {
+      const target = webOrders.find((o) => o.id === orderId);
+      if (!target) return null;
+      const updated: WebOrder = {
+        ...target,
+        status: nextStatus,
+        updatedAtMs: Date.now(),
+      };
+      setWebOrders((prev) => prev.map((o) => (o.id === orderId ? updated : o)));
+      queueOrSyncWebOrderUpsert(updated);
+
+      if (storefrontUser) {
+        void updateStorefrontOrderStatus(target.orderCode, nextStatus).catch(() => {});
+      }
+
+      const targetUrl = sanitizeWebsiteUrl(settings.websiteUrl);
+      if (targetUrl) {
+        void fetch('/api/storefront/proxy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            websiteUrl: targetUrl,
+            path: `/api/external/orders/${encodeURIComponent(target.orderCode)}/status`,
+            method: 'PATCH',
+            payload: { status: nextStatus },
+          }),
+        }).catch(() => {});
+      }
+
+      return updated;
+    },
+    [webOrders, queueOrSyncWebOrderUpsert, storefrontUser, settings.websiteUrl]
+  );
+
+  const deleteWebOrder = useCallback(
+    (orderId: string) => {
+      setWebOrders((prev) => prev.filter((o) => o.id !== orderId));
+
+      if (user && user.emailVerified) {
+        void commitWebOrderDeleteToFirestore(orderId).catch((err) => {
+          setSyncError(err instanceof Error ? err.message : 'تعذر حذف طلب الموقع');
+        });
+      } else {
+        setPendingWebOrderOps((prev) => [
+          ...prev.filter((op) => op.orderId !== orderId),
+          {
+            id: `del_wo_${orderId}_${Date.now()}`,
+            type: 'delete',
+            orderId,
+            queuedAt: Date.now(),
+          },
+        ]);
+      }
+      void fetch(`/api/storefront/webhook-orders/${encodeURIComponent(orderId)}`, {
+        method: 'DELETE',
+      }).catch(() => {});
+    },
+    [user, commitWebOrderDeleteToFirestore]
+  );
+
+  const pullOrdersFromStorefrontNow = useCallback(async (): Promise<{
+    importedCount: number;
+    webhookCount: number;
+    firebaseCount: number;
+    apiReachable: boolean;
+    note: string;
+  }> => {
+    let webhookCount = 0;
+    let firebaseCount = 0;
+    let apiReachable = false;
+    const gathered: WebOrder[] = [];
+
+    // 1. Pull from local Express webhook ingestion queue
+    try {
+      const res = await fetch('/api/storefront/webhook-orders');
+      if (res.ok) {
+        const data = (await res.json()) as { orders?: unknown[] };
+        if (Array.isArray(data.orders)) {
+          for (const raw of data.orders) {
+            const norm = normalizeWebOrder(raw, 'webhook');
+            if (norm) {
+              gathered.push(norm);
+              webhookCount += 1;
+            }
+          }
+        }
+      }
+    } catch {
+      // ignore offline webhook poll
+    }
+
+    // 2. Pull from Storefront Firebase if admin connected
+    if (storefrontUser) {
+      try {
+        const sfOrders = await fetchStorefrontOrdersOnce();
+        firebaseCount = sfOrders.length;
+        gathered.push(...sfOrders);
+      } catch {
+        // handled below via state
+      }
+    }
+
+    // 3. Probe Storefront REST API /api/external/orders via server-side proxy
+    const targetUrl = sanitizeWebsiteUrl(settings.websiteUrl);
+    if (targetUrl) {
+      try {
+        const proxyRes = await fetch('/api/storefront/proxy', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            websiteUrl: targetUrl,
+            path: '/api/external/orders',
+            method: 'GET',
+          }),
+        });
+        if (proxyRes.ok) {
+          const data = (await proxyRes.json()) as {
+            ok?: boolean;
+            upstreamStatus?: number;
+            data?: { orders?: unknown[] } | unknown[];
+          };
+          if (data.ok) {
+            apiReachable = true;
+            const list = Array.isArray(data.data)
+              ? data.data
+              : data.data && typeof data.data === 'object' && Array.isArray(data.data.orders)
+              ? data.data.orders
+              : [];
+            for (const raw of list) {
+              const norm = normalizeWebOrder(raw, 'api');
+              if (norm) gathered.push(norm);
+            }
+          }
+        }
+      } catch {
+        // ignore network error
+      }
+    }
+
+    const importedCount = upsertIncomingWebOrders(gathered);
+    const note = storefrontUser
+      ? `تمت المزامنة: ${firebaseCount} طلب من قاعدة الموقع و${webhookCount} عبر Webhook`
+      : apiReachable
+      ? `تمت المزامنة مع API الموقع (${gathered.length} طلب)`
+      : `تم فحص الطلبات الواردة (${webhookCount} عبر Webhook) — اربط حساب إدارة المتجر لمزامنة Firebase المباشرة`;
+
+    return { importedCount, webhookCount, firebaseCount, apiReachable, note };
+  }, [storefrontUser, settings.websiteUrl, upsertIncomingWebOrders]);
+
+  // Keep a ref to latest upsertIncomingWebOrders so polling & Storefront snapshot never churn
+  const upsertIncomingWebOrdersRef = useRef(upsertIncomingWebOrders);
+  useEffect(() => {
+    upsertIncomingWebOrdersRef.current = upsertIncomingWebOrders;
+  }, [upsertIncomingWebOrders]);
+
+  // Live subscription to Storefront Firebase `orders` when Storefront Admin is signed in
+  useEffect(() => {
+    if (!storefrontUser) return;
+    const unsub = subscribeStorefrontOrders(
+      (orders) => {
+        upsertIncomingWebOrdersRef.current(orders);
+      },
+      (err) => {
+        setStorefrontSyncStatus((prev) => ({
+          ...prev,
+          state: 'error',
+          message: `تنبيه قراءة طلبات الموقع: ${err.message}`,
+        }));
+      }
+    );
+    return unsub;
+  }, [storefrontUser]);
+
+  // Poll local webhook receiver every 15s (plus on mount) so orders posted from storefront appear automatically
+  useEffect(() => {
+    let active = true;
+    const pollWebhook = async () => {
+      try {
+        const res = await fetch('/api/storefront/webhook-orders');
+        if (!res.ok || !active) return;
+        const data = (await res.json()) as { orders?: unknown[] };
+        if (Array.isArray(data.orders) && data.orders.length > 0 && active) {
+          const normalized = data.orders
+            .map((raw) => normalizeWebOrder(raw, 'webhook'))
+            .filter((x): x is WebOrder => x !== null);
+          if (normalized.length > 0) {
+            upsertIncomingWebOrdersRef.current(normalized);
+          }
+        }
+      } catch {
+        // ignore transient poll failures
+      }
+    };
+    void pollWebhook();
+    const timer = window.setInterval(() => void pollWebhook(), 15000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const signInStorefront = useCallback(async () => {
+    const signedUser = await signInStorefrontAdmin();
+    setStorefrontUser(signedUser);
+    return signedUser;
+  }, []);
+
+  const signOutStorefront = useCallback(async () => {
+    await signOutStorefrontAdmin();
+    setStorefrontUser(null);
+  }, []);
+
   const totalPendingCount =
-    pendingOps.length + pendingPriceOps.length + pendingRepairOps.length;
+    pendingOps.length +
+    pendingPriceOps.length +
+    pendingRepairOps.length +
+    pendingWebProductOps.length +
+    pendingWebOrderOps.length;
 
   const syncState: SyncState = useMemo(() => {
     if (syncError) return 'error';
@@ -1646,6 +2819,10 @@ export function useOpticsStore() {
     customers,
     priceItems,
     repairs,
+    webProducts,
+    webOrders,
+    storefrontUser,
+    storefrontSyncStatus,
     settings,
     saveCustomer,
     updateOrderStage,
@@ -1664,6 +2841,17 @@ export function useOpticsStore() {
     deleteRepair,
     importRepairs,
     loadSampleRepairs,
+    saveWebProduct,
+    toggleWebProductAvailability,
+    deleteWebProduct,
+    syncAllProductsToStorefront,
+    signInStorefront,
+    signOutStorefront,
+    upsertIncomingWebOrders,
+    convertWebOrderToCustomer,
+    updateWebOrderStatus,
+    deleteWebOrder,
+    pullOrdersFromStorefrontNow,
     updateSettings,
     flushPendingOps,
   };

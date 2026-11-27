@@ -43,6 +43,12 @@ service cloud.firestore {
         && (arr.size() == 0 || arr[0] == null || arr[0] is number);
     }
 
+    function isValidColorList(arr) {
+      return arr is list
+        && arr.size() <= 15
+        && (arr.size() == 0 || (arr[0] is string && arr[0].size() >= 1 && arr[0].size() <= 40));
+    }
+
     // --- Validation Blueprints ---
     function isValidCustomer(data, customerId) {
       return data.keys().hasAll([
@@ -121,13 +127,15 @@ service cloud.firestore {
           'ownerId', 'shopName', 'autoWhatsApp', 'waTemplate', 'publicBaseUrl', 'createdAt', 'updatedAt'
         ])
         && data.keys().hasOnly([
-          'ownerId', 'shopName', 'autoWhatsApp', 'waTemplate', 'publicBaseUrl', 'createdAt', 'updatedAt'
+          'ownerId', 'shopName', 'autoWhatsApp', 'waTemplate', 'publicBaseUrl', 'websiteUrl', 'autoTransferWebOrdersToWhatsApp', 'createdAt', 'updatedAt'
         ])
         && data.ownerId is string && data.ownerId == userId && data.ownerId == request.auth.uid && isValidId(data.ownerId)
         && data.shopName is string && data.shopName.size() >= 1 && data.shopName.size() <= 80
         && data.autoWhatsApp is bool
         && data.waTemplate is string && data.waTemplate.size() <= 600
         && data.publicBaseUrl is string && data.publicBaseUrl.size() <= 200
+        && (!('websiteUrl' in data) || (data.websiteUrl is string && data.websiteUrl.size() <= 200))
+        && (!('autoTransferWebOrdersToWhatsApp' in data) || data.autoTransferWebOrdersToWhatsApp is bool)
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -210,6 +218,67 @@ service cloud.firestore {
         && data.pickupDate is string && data.pickupDate.size() <= 20
         && (data.pickupDate == '' || data.pickupDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$'))
         && data.delivered is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidWebProduct(data, productId) {
+      return data.keys().hasAll([
+          'id', 'ownerId', 'name', 'category', 'price', 'colors', 'available',
+          'notes', 'photo', 'createdAtMs', 'updatedAtMs', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'ownerId', 'name', 'category', 'price', 'colors', 'available',
+          'notes', 'photo', 'createdAtMs', 'updatedAtMs', 'createdAt', 'updatedAt'
+        ])
+        && data.id is string && data.id == productId && data.id.size() <= 64 && isValidId(data.id)
+        && data.ownerId is string && data.ownerId == request.auth.uid && isValidId(data.ownerId)
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 120
+        && data.category is string && data.category in ['medical_glasses', 'sunglasses', 'lenses', 'contact_lenses', 'accessories']
+        && data.price is number && data.price >= 0 && data.price <= 10000000
+        && isValidColorList(data.colors)
+        && data.available is bool
+        && data.notes is string && data.notes.size() <= 240
+        && data.photo is string && data.photo.size() <= 350000
+        && data.createdAtMs is number && data.createdAtMs >= 0
+        && data.updatedAtMs is number && data.updatedAtMs >= 0
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidWebOrder(data, orderId) {
+      return data.keys().hasAll([
+          'id', 'ownerId', 'orderCode', 'invoiceNumber', 'orderType',
+          'customerName', 'customerPhone', 'customerAddress', 'notes',
+          'items', 'prescription', 'frameSubtotal', 'lensSubtotal', 'total',
+          'status', 'source', 'createdAtMs', 'updatedAtMs', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'ownerId', 'orderCode', 'invoiceNumber', 'orderType',
+          'customerName', 'customerPhone', 'customerAddress', 'notes',
+          'items', 'prescription', 'frameSubtotal', 'lensSubtotal', 'total',
+          'status', 'source', 'convertedCustomerId', 'createdAtMs', 'updatedAtMs',
+          'createdAt', 'updatedAt'
+        ])
+        && data.id is string && data.id == orderId && data.id.size() <= 64 && isValidId(data.id)
+        && data.ownerId is string && data.ownerId == request.auth.uid && isValidId(data.ownerId)
+        && data.orderCode is string && data.orderCode.size() >= 1 && data.orderCode.size() <= 64
+        && data.invoiceNumber is string && data.invoiceNumber.size() <= 64
+        && data.orderType is string && data.orderType in ['standard', 'preorder']
+        && data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 120
+        && data.customerPhone is string && data.customerPhone.size() <= 30
+        && data.customerAddress is string && data.customerAddress.size() <= 240
+        && data.notes is string && data.notes.size() <= 400
+        && data.items is list && data.items.size() <= 50
+        && (data.prescription == null || data.prescription is map)
+        && data.frameSubtotal is number && data.frameSubtotal >= 0 && data.frameSubtotal <= 10000000
+        && data.lensSubtotal is number && data.lensSubtotal >= 0 && data.lensSubtotal <= 10000000
+        && data.total is number && data.total >= 0 && data.total <= 10000000
+        && data.status is string && data.status in ['pending', 'confirmed', 'preparing', 'ready', 'delivered', 'cancelled']
+        && data.source is string && data.source in ['storefront_firebase', 'webhook', 'api', 'manual']
+        && (!('convertedCustomerId' in data) || (data.convertedCustomerId is string && data.convertedCustomerId.size() <= 64))
+        && data.createdAtMs is number && data.createdAtMs >= 0
+        && data.updatedAtMs is number && data.updatedAtMs >= 0
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -297,7 +366,7 @@ service cloud.firestore {
         && incoming().ownerId == existing().ownerId
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly(['shopName', 'autoWhatsApp', 'waTemplate', 'publicBaseUrl', 'updatedAt']);
+        && incoming().diff(existing()).affectedKeys().hasOnly(['shopName', 'autoWhatsApp', 'waTemplate', 'publicBaseUrl', 'websiteUrl', 'autoTransferWebOrdersToWhatsApp', 'updatedAt']);
 
       allow delete: if false;
     }
@@ -387,6 +456,62 @@ service cloud.firestore {
         );
 
       allow delete: if isSignedIn() && isVerified() && isValidId(trackId) && existing().ownerId == request.auth.uid;
+    }
+
+    match /webProducts/{productId} {
+      allow get: if isSignedIn() && isVerified() && isValidId(productId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && isVerified() && resource.data.ownerId == request.auth.uid;
+
+      allow create: if isSignedIn() && isVerified()
+        && isValidId(productId)
+        && isValidWebProduct(incoming(), productId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isSignedIn() && isVerified()
+        && isValidId(productId)
+        && existing().ownerId == request.auth.uid
+        && isValidWebProduct(incoming(), productId)
+        && incoming().ownerId == existing().ownerId
+        && incoming().id == existing().id
+        && incoming().createdAtMs == existing().createdAtMs
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'category', 'price', 'colors', 'available', 'notes', 'photo', 'updatedAtMs', 'updatedAt'])
+          || incoming().diff(existing()).affectedKeys().hasOnly(['available', 'updatedAtMs', 'updatedAt'])
+        );
+
+      allow delete: if isSignedIn() && isVerified() && isValidId(productId) && existing().ownerId == request.auth.uid;
+    }
+
+    match /webOrders/{orderId} {
+      allow get: if isSignedIn() && isVerified() && isValidId(orderId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && isVerified() && resource.data.ownerId == request.auth.uid;
+
+      allow create: if isSignedIn() && isVerified()
+        && isValidId(orderId)
+        && isValidWebOrder(incoming(), orderId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isSignedIn() && isVerified()
+        && isValidId(orderId)
+        && existing().ownerId == request.auth.uid
+        && isValidWebOrder(incoming(), orderId)
+        && incoming().ownerId == existing().ownerId
+        && incoming().id == existing().id
+        && incoming().createdAtMs == existing().createdAtMs
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'convertedCustomerId', 'updatedAtMs', 'updatedAt'])
+          || incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAtMs', 'updatedAt'])
+          || incoming().diff(existing()).affectedKeys().hasOnly(['convertedCustomerId', 'updatedAtMs', 'updatedAt'])
+          || incoming().diff(existing()).affectedKeys().hasOnly(['orderCode', 'invoiceNumber', 'orderType', 'customerName', 'customerPhone', 'customerAddress', 'notes', 'items', 'prescription', 'frameSubtotal', 'lensSubtotal', 'total', 'status', 'source', 'convertedCustomerId', 'updatedAtMs', 'updatedAt'])
+        );
+
+      allow delete: if isSignedIn() && isVerified() && isValidId(orderId) && existing().ownerId == request.auth.uid;
     }
 
     match /test/connection {
