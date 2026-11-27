@@ -959,6 +959,7 @@ function MidoOpticsApp() {
               customers={store.customers}
               settings={store.settings}
               storefrontUser={store.storefrontUser}
+              storefrontSyncStatus={store.storefrontSyncStatus}
               onSignInStorefront={handleSignInStorefront}
               onSignOutStorefront={handleSignOutStorefront}
               onPullNow={store.pullOrdersFromStorefrontNow}

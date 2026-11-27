@@ -879,6 +879,7 @@ test('mapWebProductToStorefrontProduct and mapWebProductToStorefrontLens produce
     updatedAtMs: 2000,
   };
   const mappedLens = mapWebProductToStorefrontLens(activeLens);
+  assert.equal(mappedLens.docId, `lens-${mappedLens.id}`);
   assert.equal(mappedLens.published, true);
   assert.equal(mappedLens.price, 550);
   assert.deepEqual(mappedLens.details, ['حماية الشاشات', 'ضد الانعكاس']);

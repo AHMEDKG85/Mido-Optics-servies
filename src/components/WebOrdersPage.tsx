@@ -41,6 +41,10 @@ interface WebOrdersPageProps {
   customers: CustomerRecord[];
   settings: ShopSettings;
   storefrontUser: User | null;
+  storefrontSyncStatus?: {
+    state: 'idle' | 'syncing' | 'ok' | 'partial' | 'error';
+    message: string;
+  };
   onSignInStorefront: () => Promise<void> | void;
   onSignOutStorefront: () => Promise<void> | void;
   onPullNow: () => Promise<{
@@ -84,6 +88,7 @@ export const WebOrdersPage: React.FC<WebOrdersPageProps> = ({
   customers,
   settings,
   storefrontUser,
+  storefrontSyncStatus,
   onSignInStorefront,
   onSignOutStorefront,
   onPullNow,
@@ -284,6 +289,27 @@ export const WebOrdersPage: React.FC<WebOrdersPageProps> = ({
             )}
           </button>
         </div>
+
+        {storefrontSyncStatus?.state === 'error' && storefrontSyncStatus.message && (
+          <div className="text-xs font-semibold px-3 py-2.5 rounded-xl border bg-rose-50 dark:bg-rose-950/35 border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 flex flex-wrap items-center justify-between gap-2">
+            <span className="leading-relaxed">{storefrontSyncStatus.message}</span>
+            {storefrontUser && (
+              <button
+                type="button"
+                onClick={() => {
+                  void (async () => {
+                    await onSignOutStorefront();
+                    await onSignInStorefront();
+                  })();
+                }}
+                className="min-h-[34px] px-3 py-1 rounded-lg bg-white dark:bg-[#101c28] border border-rose-300 dark:border-rose-700 hover:border-[#c9a24b] text-rose-700 dark:text-rose-200 text-xs font-bold inline-flex items-center gap-1.5 shrink-0 cursor-pointer"
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                <span>تغيير حساب المتجر</span>
+              </button>
+            )}
+          </div>
+        )}
 
         {lastSyncNote && (
           <p className="text-xs font-semibold text-[#8f6c1e] dark:text-[#e8cf8b] bg-[#f9f3e3]/80 dark:bg-[#1b2936] border border-[#c9a24b]/35 rounded-xl px-3 py-2">

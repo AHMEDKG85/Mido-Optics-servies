@@ -1955,7 +1955,7 @@ export function mapWebProductToStorefrontLens(
     : [];
 
   return {
-    docId: `lens-${buildStorefrontSlug(product.id, 'lens')}`,
+    docId: `lens-${numericId}`,
     id: numericId,
     name: product.name.slice(0, 140),
     subtitle: (product.notes || 'عدسة طبية معتمدة').slice(0, 240),

@@ -24,6 +24,7 @@ try {
   firestoreInstance = initializeFirestore(
     app,
     {
+      experimentalAutoDetectLongPolling: true,
       localCache: persistentLocalCache({
         tabManager: persistentMultipleTabManager(),
       }),
@@ -94,7 +95,7 @@ export async function testConnection(): Promise<void> {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
     if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error('Please check your Firebase configuration or network connection.');
+      console.warn('Firestore connection check: operating in offline mode until backend responds.');
     }
   }
 }

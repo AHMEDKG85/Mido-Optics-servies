@@ -470,8 +470,8 @@ export const WebControlPanelPage: React.FC<WebControlPanelPageProps> = ({
           </div>
 
           {storefrontSyncStatus?.message && (
-            <p
-              className={`text-xs font-semibold px-3 py-2 rounded-xl border ${
+            <div
+              className={`text-xs font-semibold px-3 py-2.5 rounded-xl border flex flex-wrap items-center justify-between gap-2 ${
                 storefrontSyncStatus.state === 'error'
                   ? 'bg-rose-50 dark:bg-rose-950/35 border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300'
                   : storefrontSyncStatus.state === 'ok'
@@ -479,8 +479,26 @@ export const WebControlPanelPage: React.FC<WebControlPanelPageProps> = ({
                   : 'bg-[#f9f3e3]/75 dark:bg-[#1b2936] border-[#c9a24b]/35 text-[#8f6c1e] dark:text-[#e8cf8b]'
               }`}
             >
-              {storefrontSyncStatus.message}
-            </p>
+              <span className="leading-relaxed">{storefrontSyncStatus.message}</span>
+              {storefrontSyncStatus.state === 'error' &&
+                storefrontUser &&
+                onSignOutStorefront &&
+                onSignInStorefront && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void (async () => {
+                        await onSignOutStorefront();
+                        await onSignInStorefront();
+                      })();
+                    }}
+                    className="min-h-[34px] px-3 py-1 rounded-lg bg-white dark:bg-[#101c28] border border-rose-300 dark:border-rose-700 hover:border-[#c9a24b] text-rose-700 dark:text-rose-200 text-xs font-bold inline-flex items-center gap-1.5 shrink-0 cursor-pointer"
+                  >
+                    <LogIn className="w-3.5 h-3.5" />
+                    <span>تغيير حساب المتجر</span>
+                  </button>
+                )}
+            </div>
           )}
         </div>
       </div>

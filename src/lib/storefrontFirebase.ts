@@ -25,10 +25,41 @@ import {
 import { WebOrder, WebOrderStatus, WebProduct } from '../types/optics';
 import {
   buildStorefrontSlug,
+  buildStorefrontStableNumericId,
   mapWebProductToStorefrontLens,
   mapWebProductToStorefrontProduct,
   normalizeWebOrder,
 } from '../utils/optics';
+
+export function isStorefrontPermissionError(err: unknown): boolean {
+  if (!err) return false;
+  const code = typeof err === 'object' && err !== null ? (err as { code?: string }).code : '';
+  const msg = err instanceof Error ? err.message : String(err);
+  return (
+    code === 'permission-denied' ||
+    /missing or insufficient permissions/i.test(msg) ||
+    /permission-denied/i.test(msg)
+  );
+}
+
+export function formatStorefrontErrorMessage(
+  err: unknown,
+  email?: string | null,
+  context: 'catalog' | 'orders' = 'catalog'
+): string {
+  const activeEmail = email || storefrontAuth.currentUser?.email || 'الحالي';
+  if (isStorefrontPermissionError(err)) {
+    const actionLabel =
+      context === 'orders'
+        ? 'قراءة أو تحديث طلبات المتجر'
+        : 'تحديث منتجات قاعدة بيانات الموقع';
+    return `الحساب المرتبط (${activeEmail}) لا يملك صلاحية ${actionLabel}. اضغط «تغيير حساب المتجر» وسجّل الدخول بحساب الإدارة المعتمد لموقع الويب.`;
+  }
+  const msg = err instanceof Error ? err.message : String(err || '');
+  return msg
+    ? `تعذر ${context === 'orders' ? 'مزامنة طلبات الموقع' : 'تحديث قاعدة الموقع'}: ${msg}`
+    : 'تعذر الاتصال بقاعدة بيانات الموقع';
+}
 
 // Public web client config used by https://mido-web-site.vercel.app
 const STOREFRONT_FIREBASE_CONFIG = {
@@ -146,7 +177,7 @@ export async function upsertStorefrontCatalogItem(
 export async function deleteStorefrontCatalogItem(product: WebProduct): Promise<void> {
   if (!storefrontAuth.currentUser) return;
   if (product.category === 'lenses') {
-    const lensDocId = `lens-${buildStorefrontSlug(product.id, 'lens')}`;
+    const lensDocId = `lens-${buildStorefrontStableNumericId(product.id)}`;
     await deleteDoc(doc(storefrontDb, 'lenses', lensDocId));
     return;
   }

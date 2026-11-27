@@ -23,6 +23,7 @@ import {
   deleteStorefrontCatalogItem,
   fetchPublicStorefrontCatalog,
   fetchStorefrontOrdersOnce,
+  formatStorefrontErrorMessage,
   onStorefrontAuthChanged,
   signInStorefrontAdmin,
   signOutStorefrontAdmin,
@@ -2214,11 +2215,7 @@ export function useOpticsStore() {
             }
           }
         } catch (err) {
-          notes.push(
-            err instanceof Error
-              ? `تعذر تحديث قاعدة الموقع: ${err.message}`
-              : 'تعذر تحديث قاعدة بيانات الموقع'
-          );
+          notes.push(formatStorefrontErrorMessage(err, storefrontUser.email, 'catalog'));
         }
       }
 
@@ -2417,13 +2414,41 @@ export function useOpticsStore() {
       message: 'جاري مزامنة جميع المنتجات والعدسات مع الموقع...',
     }));
     let synced = 0;
+    let lastErrorNote = '';
     for (const product of webProducts) {
       const res = await pushSingleProductToStorefront(product);
-      if (res.synced) synced += 1;
+      if (res.synced) {
+        synced += 1;
+      } else if (res.note) {
+        lastErrorNote = res.note;
+      }
     }
+
+    if (webProducts.length > 0 && synced === 0 && lastErrorNote) {
+      try {
+        const publicCounts = await fetchPublicStorefrontCatalog();
+        setStorefrontSyncStatus({
+          state: 'error',
+          message: lastErrorNote,
+          publicProductsCount: publicCounts.publishedProductsCount,
+          publicLensesCount: publicCounts.publishedLensesCount,
+        });
+      } catch {
+        setStorefrontSyncStatus((prev) => ({
+          ...prev,
+          state: 'error',
+          message: lastErrorNote,
+        }));
+      }
+      return { synced: 0, total: webProducts.length, message: lastErrorNote };
+    }
+
     try {
       const publicCounts = await fetchPublicStorefrontCatalog();
-      const msg = `تمت مزامنة ${synced} من ${webProducts.length} منتج مع الموقع بنجاح`;
+      const msg =
+        synced === webProducts.length
+          ? `تمت مزامنة ${synced} من ${webProducts.length} منتج مع الموقع بنجاح`
+          : lastErrorNote || `تمت مزامنة ${synced} من ${webProducts.length} منتج مع الموقع`;
       setStorefrontSyncStatus({
         state: synced === webProducts.length ? 'ok' : 'partial',
         message: msg,
@@ -2433,8 +2458,15 @@ export function useOpticsStore() {
       });
       return { synced, total: webProducts.length, message: msg };
     } catch {
-      const msg = `تمت مزامنة ${synced} من ${webProducts.length} منتج مع الموقع`;
-      setStorefrontSyncStatus({ state: 'ok', message: msg, lastSyncedAt: Date.now() });
+      const msg =
+        synced === webProducts.length
+          ? `تمت مزامنة ${synced} من ${webProducts.length} منتج مع الموقع`
+          : lastErrorNote || `تمت مزامنة ${synced} من ${webProducts.length} منتج مع الموقع`;
+      setStorefrontSyncStatus({
+        state: synced === webProducts.length ? 'ok' : 'partial',
+        message: msg,
+        lastSyncedAt: Date.now(),
+      });
       return { synced, total: webProducts.length, message: msg };
     }
   }, [storefrontUser, webProducts, pushSingleProductToStorefront]);
@@ -2745,7 +2777,7 @@ export function useOpticsStore() {
         setStorefrontSyncStatus((prev) => ({
           ...prev,
           state: 'error',
-          message: `تنبيه قراءة طلبات الموقع: ${err.message}`,
+          message: formatStorefrontErrorMessage(err, storefrontUser.email, 'orders'),
         }));
       }
     );
@@ -2783,12 +2815,22 @@ export function useOpticsStore() {
   const signInStorefront = useCallback(async () => {
     const signedUser = await signInStorefrontAdmin();
     setStorefrontUser(signedUser);
+    setStorefrontSyncStatus((prev) => ({
+      ...prev,
+      state: 'idle',
+      message: '',
+    }));
     return signedUser;
   }, []);
 
   const signOutStorefront = useCallback(async () => {
     await signOutStorefrontAdmin();
     setStorefrontUser(null);
+    setStorefrontSyncStatus((prev) => ({
+      ...prev,
+      state: 'idle',
+      message: '',
+    }));
   }, []);
 
   const totalPendingCount =
