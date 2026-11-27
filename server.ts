@@ -386,6 +386,10 @@ async function startServer() {
         return;
       }
       targetUrl = new URL(rawPath, base.origin);
+      if (targetUrl.origin !== base.origin || !targetUrl.pathname.startsWith('/api/external/')) {
+        res.status(400).json({ ok: false, error: 'Proxy only allows /api/external/* endpoints' });
+        return;
+      }
     } catch {
       res.status(400).json({ ok: false, error: 'Invalid websiteUrl or endpoint path' });
       return;
@@ -406,16 +410,17 @@ async function startServer() {
       const upstream = await fetch(targetUrl.toString(), {
         method: rawMethod,
         headers,
+        redirect: 'manual',
         body:
           rawMethod === 'GET' || rawMethod === 'DELETE'
             ? undefined
             : JSON.stringify(body.payload ?? {}),
         signal: controller.signal,
       });
-      clearTimeout(timer);
 
       const contentType = upstream.headers.get('content-type') || '';
       const text = await upstream.text();
+      clearTimeout(timer);
       let parsed: unknown = null;
       if (contentType.includes('application/json')) {
         try {
