@@ -20,6 +20,7 @@ import {
   setDoc,
   updateDoc,
   where,
+  writeBatch,
   Firestore,
 } from 'firebase/firestore';
 import { WebOrder, WebOrderStatus, WebProduct } from '../types/optics';
@@ -199,6 +200,63 @@ export async function updateStorefrontOrderStatus(
     updatedAt: serverTimestamp(),
   });
   return true;
+}
+
+function normalizeDeletedOrderCode(value: unknown): string {
+  return String(value || '').trim().toUpperCase().slice(0, 64);
+}
+
+export async function fetchStorefrontDeletedOrderCodes(): Promise<string[]> {
+  if (!storefrontAuth.currentUser) {
+    throw new Error('قم بتسجيل الدخول لإدارة المتجر لمزامنة الطلبات المحذوفة');
+  }
+  const snapshot = await getDocs(collection(storefrontDb, 'deleted_order_codes'));
+  return snapshot.docs
+    .map((item) => normalizeDeletedOrderCode(item.data().orderCode || item.id))
+    .filter(Boolean);
+}
+
+export async function saveStorefrontDeletedOrderCodes(orderCodes: string[]): Promise<void> {
+  if (!storefrontAuth.currentUser) {
+    throw new Error('قم بتسجيل الدخول لإدارة المتجر لحفظ الحذف على الموقع');
+  }
+  const codes = Array.from(new Set(orderCodes.map(normalizeDeletedOrderCode).filter(Boolean)));
+  for (let start = 0; start < codes.length; start += 400) {
+    const batch = writeBatch(storefrontDb);
+    for (const orderCode of codes.slice(start, start + 400)) {
+      batch.set(doc(storefrontDb, 'deleted_order_codes', orderCode), {
+        orderCode,
+        deletedAt: serverTimestamp(),
+      });
+    }
+    await batch.commit();
+  }
+}
+
+export async function deleteStorefrontOrder(orderCode: string): Promise<void> {
+  if (!storefrontAuth.currentUser) return;
+  const normalizedCode = normalizeDeletedOrderCode(orderCode);
+  if (!normalizedCode) return;
+  await saveStorefrontDeletedOrderCodes([normalizedCode]);
+  const docId = `ord-${buildStorefrontSlug(normalizedCode, 'ord')}`;
+  await deleteDoc(doc(storefrontDb, 'orders', docId));
+}
+
+export function subscribeStorefrontDeletedOrderCodes(
+  onCodes: (codes: string[]) => void,
+  onError: (error: Error) => void
+): () => void {
+  return onSnapshot(
+    collection(storefrontDb, 'deleted_order_codes'),
+    (snapshot) => {
+      onCodes(
+        snapshot.docs
+          .map((item) => normalizeDeletedOrderCode(item.data().orderCode || item.id))
+          .filter(Boolean)
+      );
+    },
+    onError
+  );
 }
 
 export function subscribeStorefrontOrders(

@@ -1,4 +1,8 @@
-export function compressFramePhotoFile(file: File, maxDimension = 380): Promise<string> {
+export function compressFramePhotoFile(
+  file: File,
+  maxDimension = 380,
+  quality = 0.72
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const objectUrl = URL.createObjectURL(file);
@@ -15,7 +19,7 @@ export function compressFramePhotoFile(file: File, maxDimension = 380): Promise<
           return;
         }
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
+        const dataUrl = canvas.toDataURL('image/jpeg', Math.min(0.92, Math.max(0.35, quality)));
         URL.revokeObjectURL(objectUrl);
         resolve(dataUrl);
       } catch (err) {

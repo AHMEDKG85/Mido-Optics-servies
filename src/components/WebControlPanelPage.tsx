@@ -32,6 +32,8 @@ import {
   WebProductCategory,
 } from '../types/optics';
 import { compressFramePhotoFile } from '../utils/image';
+import { StorefrontContentEditor } from './StorefrontContentEditor';
+import { StorefrontCatalogEditor } from './StorefrontCatalogEditor';
 import {
   DEFAULT_STOREFRONT_WEBSITE_URL,
   filterWebProducts,
@@ -395,6 +397,17 @@ export const WebControlPanelPage: React.FC<WebControlPanelPageProps> = ({
             </a>
           )}
         </form>
+
+        <StorefrontContentEditor
+          websiteUrl={savedWebsiteUrl}
+          storefrontAdminUserId={storefrontUser?.uid}
+          onToast={onToast}
+        />
+        <StorefrontCatalogEditor
+          websiteUrl={savedWebsiteUrl}
+          storefrontAdminUserId={storefrontUser?.uid}
+          onToast={onToast}
+        />
 
         {/* Direct Storefront Sync Bar */}
         <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2.5">

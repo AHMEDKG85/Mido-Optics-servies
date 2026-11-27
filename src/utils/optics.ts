@@ -1941,7 +1941,9 @@ export function mapWebProductToStorefrontLens(
 ): StorefrontLensPayload {
   const numericId = buildStorefrontStableNumericId(product.id);
   const safeRemoteImg =
-    product.photo && /^https?:\/\//i.test(product.photo) && product.photo.length <= 500
+    product.photo && product.photo.startsWith('data:image/') && product.photo.length <= 350_000
+      ? product.photo
+      : product.photo && /^https?:\/\//i.test(product.photo) && product.photo.length <= 500
       ? product.photo
       : product.photo && product.photo.startsWith('/') && product.photo.length <= 500
       ? product.photo
