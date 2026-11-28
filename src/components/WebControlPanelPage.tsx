@@ -32,8 +32,6 @@ import {
   WebProductCategory,
 } from '../types/optics';
 import { compressFramePhotoFile } from '../utils/image';
-import { StorefrontContentEditor } from './StorefrontContentEditor';
-import { StorefrontCatalogEditor } from './StorefrontCatalogEditor';
 import {
   DEFAULT_STOREFRONT_WEBSITE_URL,
   filterWebProducts,
@@ -145,10 +143,6 @@ export const WebControlPanelPage: React.FC<WebControlPanelPageProps> = ({
   const [name, setName] = useState('');
   const [category, setCategory] = useState<WebProductCategory>('medical_glasses');
   const [price, setPrice] = useState('');
-  const [brand, setBrand] = useState('');
-  const [discountPrice, setDiscountPrice] = useState('');
-  const [featured, setFeatured] = useState(false);
-  const [newArrival, setNewArrival] = useState(false);
   const [colors, setColors] = useState<string[]>(['أسود']);
   const [customColorInput, setCustomColorInput] = useState('');
   const [available, setAvailable] = useState(true);
@@ -194,10 +188,6 @@ export const WebControlPanelPage: React.FC<WebControlPanelPageProps> = ({
     setName('');
     setCategory(defaultCat ?? (categoryFilter === 'all' ? 'medical_glasses' : categoryFilter));
     setPrice('');
-    setBrand('');
-    setDiscountPrice('');
-    setFeatured(false);
-    setNewArrival(false);
     setColors(['أسود']);
     setCustomColorInput('');
     setAvailable(true);
@@ -215,10 +205,6 @@ export const WebControlPanelPage: React.FC<WebControlPanelPageProps> = ({
     setName(product.name);
     setCategory(product.category);
     setPrice(String(product.price));
-    setBrand(product.brand || '');
-    setDiscountPrice(product.discountPrice ? String(product.discountPrice) : '');
-    setFeatured(product.featured === true);
-    setNewArrival(product.newArrival === true);
     setColors(product.colors.length > 0 ? product.colors : []);
     setCustomColorInput('');
     setAvailable(product.available);
@@ -269,11 +255,6 @@ export const WebControlPanelPage: React.FC<WebControlPanelPageProps> = ({
       onToast('أدخل سعراً صحيحاً');
       return;
     }
-    const parsedDiscountPrice = discountPrice.trim() ? Number(discountPrice) : undefined;
-    if (parsedDiscountPrice !== undefined && (!Number.isFinite(parsedDiscountPrice) || parsedDiscountPrice <= 0 || parsedDiscountPrice >= parsedPrice)) {
-      onToast('يجب أن يكون سعر الخصم أكبر من صفر وأقل من السعر الأساسي.');
-      return;
-    }
 
     const finalColors = customColorInput.trim()
       ? sanitizeProductColors([...colors, customColorInput.trim()])
@@ -284,10 +265,6 @@ export const WebControlPanelPage: React.FC<WebControlPanelPageProps> = ({
       name: trimmedName,
       category,
       price: parsedPrice,
-      brand: brand.trim().slice(0, 100),
-      ...(parsedDiscountPrice !== undefined ? { discountPrice: parsedDiscountPrice } : { discountPrice: undefined }),
-      featured,
-      newArrival,
       colors: finalColors,
       available,
       notes: notes.trim(),
@@ -418,17 +395,6 @@ export const WebControlPanelPage: React.FC<WebControlPanelPageProps> = ({
             </a>
           )}
         </form>
-
-        <StorefrontContentEditor
-          websiteUrl={savedWebsiteUrl}
-          storefrontAdminUserId={storefrontUser?.uid}
-          onToast={onToast}
-        />
-        <StorefrontCatalogEditor
-          websiteUrl={savedWebsiteUrl}
-          storefrontAdminUserId={storefrontUser?.uid}
-          onToast={onToast}
-        />
 
         {/* Direct Storefront Sync Bar */}
         <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2.5">
@@ -620,17 +586,6 @@ export const WebControlPanelPage: React.FC<WebControlPanelPageProps> = ({
                 className="w-full min-h-[42px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0d1722] text-sm font-bold tabular-nums focus:outline-none focus:border-[#c9a24b]"
               />
             </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">العلامة التجارية
-              <input maxLength={100} value={brand} onChange={(event) => setBrand(event.target.value)} placeholder="مثال: MIDO" className="mt-1 w-full min-h-[42px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0d1722] text-sm" />
-            </label>
-            <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">سعر الخصم (اختياري)
-              <input type="number" min="0.01" step="any" value={discountPrice} onChange={(event) => setDiscountPrice(event.target.value)} placeholder="أقل من السعر الأساسي" className="mt-1 w-full min-h-[42px] px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#0d1722] text-sm" />
-            </label>
-            <label className="inline-flex min-h-[42px] items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300"><input type="checkbox" checked={featured} onChange={(event) => setFeatured(event.target.checked)} className="accent-[#c9a24b]" />منتج مميز</label>
-            <label className="inline-flex min-h-[42px] items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300"><input type="checkbox" checked={newArrival} onChange={(event) => setNewArrival(event.target.checked)} className="accent-[#c9a24b]" />وصل حديثاً</label>
           </div>
 
           {/* Available Colors Picker */}

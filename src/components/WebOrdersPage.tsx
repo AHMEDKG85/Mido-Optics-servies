@@ -5,7 +5,6 @@ import {
   ChevronDown,
   ChevronUp,
   Copy,
-  Download,
   Eye,
   Globe,
   Link2,
@@ -20,7 +19,6 @@ import {
   ShoppingBag,
   Trash2,
   Webhook,
-  X,
 } from 'lucide-react';
 import {
   CustomerRecord,
@@ -106,24 +104,12 @@ export const WebOrdersPage: React.FC<WebOrdersPageProps> = ({
   const [lastSyncNote, setLastSyncNote] = useState<string | null>(null);
   const [webhookDrawerOpen, setWebhookDrawerOpen] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-  const [prescriptionPreview, setPrescriptionPreview] = useState<WebOrder | null>(null);
-  const [prescriptionImageFailed, setPrescriptionImageFailed] = useState(false);
 
   useEffect(() => {
     if (!confirmDeleteId) return;
     const timer = window.setTimeout(() => setConfirmDeleteId(null), 3500);
     return () => window.clearTimeout(timer);
   }, [confirmDeleteId]);
-
-  useEffect(() => {
-    if (!prescriptionPreview) return;
-    setPrescriptionImageFailed(false);
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setPrescriptionPreview(null);
-    };
-    window.addEventListener('keydown', closeOnEscape);
-    return () => window.removeEventListener('keydown', closeOnEscape);
-  }, [prescriptionPreview]);
 
   const customerById = useMemo(() => {
     const map = new Map<string, CustomerRecord>();
@@ -660,14 +646,14 @@ export const WebOrdersPage: React.FC<WebOrdersPageProps> = ({
                         </div>
                       </div>
                       {order.prescription.imageUrl && (
-                        <button
-                          type="button"
-                          onClick={() => setPrescriptionPreview(order)}
+                        <a
+                          href={order.prescription.imageUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
                           className="inline-flex items-center gap-1 text-[11px] font-bold text-sky-700 dark:text-sky-300 underline"
                         >
-                          <Eye className="w-3.5 h-3.5" />
                           <span>عرض صورة الكشف الطبي المرفقة</span>
-                        </button>
+                        </a>
                       )}
                     </div>
                   )}
@@ -736,50 +722,6 @@ export const WebOrdersPage: React.FC<WebOrdersPageProps> = ({
               </article>
             );
           })}
-        </div>
-      )}
-      {prescriptionPreview?.prescription?.imageUrl && (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/85 p-3 sm:p-6"
-          role="dialog"
-          aria-modal="true"
-          aria-label={`صورة الكشف الطبي للطلب ${prescriptionPreview.orderCode}`}
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setPrescriptionPreview(null);
-          }}
-        >
-          <div className="flex max-h-[94vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-[#101c28] shadow-2xl">
-            <div className="flex items-center justify-between gap-3 border-b border-slate-700 px-4 py-3 text-white">
-              <div>
-                <h3 className="text-sm font-extrabold">صورة الكشف الطبي</h3>
-                <p className="mt-0.5 text-xs text-slate-300" dir="ltr">{prescriptionPreview.orderCode}</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <a
-                  href={prescriptionPreview.prescription.imageUrl}
-                  download={`prescription-${prescriptionPreview.orderCode}.jpg`}
-                  className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-slate-800 px-3 text-xs font-bold text-white hover:bg-slate-700"
-                >
-                  <Download className="h-4 w-4" /> تنزيل
-                </a>
-                <button type="button" onClick={() => setPrescriptionPreview(null)} aria-label="إغلاق الصورة" className="grid h-9 w-9 place-items-center rounded-lg bg-slate-800 text-white hover:bg-slate-700">
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-            <div className="flex min-h-48 flex-1 items-center justify-center overflow-auto bg-[#0b121a] p-2 sm:p-5">
-              {prescriptionImageFailed ? (
-                <p className="px-5 py-10 text-center text-sm text-rose-300">تعذر عرض الصورة. جرّب تنزيل الملف أو اطلب من العميل إعادة رفعه.</p>
-              ) : (
-                <img
-                  src={prescriptionPreview.prescription.imageUrl}
-                  alt={`صورة الكشف الطبي للطلب ${prescriptionPreview.orderCode}`}
-                  className="max-h-[calc(94vh-90px)] max-w-full rounded-lg object-contain"
-                  onError={() => setPrescriptionImageFailed(true)}
-                />
-              )}
-            </div>
-          </div>
         </div>
       )}
     </section>

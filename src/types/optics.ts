@@ -164,10 +164,6 @@ export interface WebProduct {
   name: string;
   category: WebProductCategory;
   price: number;
-  brand?: string;
-  discountPrice?: number;
-  featured?: boolean;
-  newArrival?: boolean;
   colors: string[];
   available: boolean;
   notes: string;
@@ -262,7 +258,6 @@ export interface PendingWebOrderSyncOp {
   id: string;
   type: 'upsert' | 'delete';
   orderId: string;
-  orderCode?: string;
   order?: WebOrder;
   queuedAt: number;
 }

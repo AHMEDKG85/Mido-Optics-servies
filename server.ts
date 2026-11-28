@@ -3,33 +3,13 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import express from 'express';
-import type { NextFunction, Request, Response } from 'express';
+import type { Request, Response } from 'express';
 import 'dotenv/config';
 
 const PORT = Number(process.env.PORT) || 3000;
 const IS_PROD = process.env.NODE_ENV === 'production';
 const DATA_DIR = path.resolve(process.cwd(), '.data');
 const WEBHOOK_ORDERS_FILE = path.resolve(DATA_DIR, 'webhook-orders.json');
-const WEBHOOK_DELETED_CODES_FILE = path.resolve(DATA_DIR, 'deleted-web-order-codes.json');
-const STOREFRONT_PROJECT_ID = 'gen-lang-client-0748882445';
-const STOREFRONT_DATABASE_ID = 'ai-studio-midooptics-b2b8b67a-82b2-4742-970e-5fe3b0f6abca';
-const STOREFRONT_PRIMARY_ADMIN_EMAILS = new Set([
-  'a3972098@gmail.com',
-  'ah429034@gmail.com',
-  'ahmeddres66@gmail.com',
-  'm64152228@gmail.com',
-]);
-const STOREFRONT_ALLOWED_HOSTS = new Set([
-  'mido-web-site.vercel.app',
-  ...String(process.env.MIDO_STOREFRONT_ALLOWED_HOSTS || '')
-    .split(',')
-    .map((host) => host.trim().toLowerCase())
-    .filter(Boolean),
-]);
-
-let firebaseSigningCertificates: Record<string, string> = {};
-let firebaseSigningCertificatesExpireAt = 0;
-const verifiedStorefrontAdmins = new Map<string, number>();
 
 interface IncomingOrderRecord {
   id: string;
@@ -86,38 +66,13 @@ function writePersistedOrders(orders: IncomingOrderRecord[]): void {
   }
 }
 
-function readDeletedOrderCodes(): string[] {
-  try {
-    if (!fs.existsSync(WEBHOOK_DELETED_CODES_FILE)) return [];
-    const parsed = JSON.parse(fs.readFileSync(WEBHOOK_DELETED_CODES_FILE, 'utf8'));
-    return Array.isArray(parsed)
-      ? Array.from(new Set(parsed.map((code) => String(code || '').trim().toUpperCase()).filter(Boolean)))
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeDeletedOrderCodes(codes: Set<string>): void {
-  try {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(
-      WEBHOOK_DELETED_CODES_FILE,
-      JSON.stringify(Array.from(codes), null, 2),
-      'utf8'
-    );
-  } catch {
-    // Keep the in-memory tombstones active when the filesystem is read-only.
-  }
-}
-
 let webhookOrders: IncomingOrderRecord[] = readPersistedOrders();
-let deletedWebhookOrderCodes = new Set(readDeletedOrderCodes());
 
 function verifyIncomingSecret(req: Request): boolean {
   const expected = String(process.env.MIDO_SYNC_SECRET || '').trim();
   if (!expected) {
-    return !IS_PROD;
+    // Preview mode when no shared secret is configured yet
+    return true;
   }
   const headerSecret = String(req.headers['x-mido-sync-secret'] || '').trim();
   const authHeader = String(req.headers.authorization || '').trim();
@@ -130,96 +85,6 @@ function verifyIncomingSecret(req: Request): boolean {
   const b = Buffer.from(expected, 'utf8');
   if (a.length !== b.length) return false;
   return crypto.timingSafeEqual(a, b);
-}
-
-async function getFirebaseSigningCertificates(): Promise<Record<string, string>> {
-  if (Date.now() < firebaseSigningCertificatesExpireAt && Object.keys(firebaseSigningCertificates).length > 0) {
-    return firebaseSigningCertificates;
-  }
-  const response = await fetch('https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com');
-  if (!response.ok) throw new Error('Firebase signing certificates are unavailable');
-  const certificates = (await response.json()) as Record<string, string>;
-  const maxAge = Number(/max-age=(\d+)/i.exec(response.headers.get('cache-control') || '')?.[1] || 3600);
-  firebaseSigningCertificates = certificates;
-  firebaseSigningCertificatesExpireAt = Date.now() + Math.max(60, Math.min(maxAge, 3600)) * 1000;
-  return certificates;
-}
-
-async function verifyStorefrontAdminToken(rawToken: string): Promise<boolean> {
-  try {
-    const parts = rawToken.split('.');
-    if (parts.length !== 3 || rawToken.length > 10000) return false;
-    const header = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8')) as {
-      alg?: string;
-      kid?: string;
-    };
-    const claims = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')) as {
-      aud?: string;
-      iss?: string;
-      sub?: string;
-      email?: string;
-      email_verified?: boolean;
-      exp?: number;
-      iat?: number;
-    };
-    const nowSeconds = Math.floor(Date.now() / 1000);
-    if (
-      header.alg !== 'RS256' || !header.kid ||
-      claims.aud !== STOREFRONT_PROJECT_ID ||
-      claims.iss !== `https://securetoken.google.com/${STOREFRONT_PROJECT_ID}` ||
-      !claims.sub || claims.sub.length > 128 ||
-      claims.email_verified !== true || !claims.email ||
-      !claims.exp || claims.exp <= nowSeconds ||
-      !claims.iat || claims.iat > nowSeconds + 60
-    ) return false;
-
-    const certificates = await getFirebaseSigningCertificates();
-    const certificate = certificates[header.kid];
-    if (!certificate) return false;
-    const verifier = crypto.createVerify('RSA-SHA256');
-    verifier.update(`${parts[0]}.${parts[1]}`);
-    verifier.end();
-    if (!verifier.verify(certificate, Buffer.from(parts[2], 'base64url'))) return false;
-
-    const uid = claims.sub;
-    const email = claims.email.trim().toLowerCase();
-    const cachedUntil = verifiedStorefrontAdmins.get(uid) || 0;
-    if (cachedUntil > Date.now()) return true;
-    if (STOREFRONT_PRIMARY_ADMIN_EMAILS.has(email)) {
-      verifiedStorefrontAdmins.set(uid, Date.now() + 5 * 60 * 1000);
-      return true;
-    }
-
-    const adminUrl = `https://firestore.googleapis.com/v1/projects/${STOREFRONT_PROJECT_ID}/databases/${STOREFRONT_DATABASE_ID}/documents/admins/${encodeURIComponent(uid)}`;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
-    const adminDoc = await fetch(adminUrl, {
-      headers: { Authorization: `Bearer ${rawToken}` },
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-    if (!adminDoc.ok) return false;
-    verifiedStorefrontAdmins.set(uid, Date.now() + 5 * 60 * 1000);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function requireStorefrontAdmin(
-  req: Request,
-  res: Response,
-  next: NextFunction
-): Promise<void> {
-  const authorization = String(req.headers.authorization || '').trim();
-  const idToken = authorization.toLowerCase().startsWith('bearer ')
-    ? authorization.slice(7).trim()
-    : '';
-  if (!idToken || !(await verifyStorefrontAdminToken(idToken))) {
-    res.status(401).json({ ok: false, error: 'يلزم تسجيل الدخول بحساب إدارة المتجر الموثق.' });
-    return;
-  }
-  next();
 }
 
 function isDisallowedHost(hostname: string): boolean {
@@ -285,7 +150,7 @@ async function startServer() {
   const app = express();
   const httpServer = http.createServer(app);
   app.set('trust proxy', 1);
-  app.use(express.json({ limit: '4mb' }));
+  app.use(express.json({ limit: '1mb' }));
 
   app.get('/api/health', (_req: Request, res: Response) => {
     res.json({
@@ -314,11 +179,6 @@ async function startServer() {
       return;
     }
 
-    if (deletedWebhookOrderCodes.has(record.orderCode.toUpperCase())) {
-      res.status(410).json({ ok: false, error: 'هذا الطلب حُذف مسبقاً ولن تتم إعادة استيراده.' });
-      return;
-    }
-
     webhookOrders = [
       record,
       ...webhookOrders.filter((item) => item.id !== record.id && item.orderCode !== record.orderCode),
@@ -336,26 +196,23 @@ async function startServer() {
   app.post('/api/webhook/storefront-order', handleWebhookOrder);
   app.post('/api/external/orders', handleWebhookOrder);
 
-  app.get('/api/storefront/webhook-orders', requireStorefrontAdmin, (_req: Request, res: Response) => {
+  app.get('/api/storefront/webhook-orders', (_req: Request, res: Response) => {
     res.json({
       ok: true,
       webhookSecretConfigured: Boolean(String(process.env.MIDO_SYNC_SECRET || '').trim()),
-      orders: webhookOrders.filter((item) => !deletedWebhookOrderCodes.has(item.orderCode.toUpperCase())),
+      orders: webhookOrders,
     });
   });
 
-  app.delete('/api/storefront/webhook-orders/:id', requireStorefrontAdmin, (req: Request, res: Response) => {
+  app.delete('/api/storefront/webhook-orders/:id', (req: Request, res: Response) => {
     const id = String(req.params.id || '').trim();
-    const removed = webhookOrders.filter((item) => item.id === id || item.orderCode === id);
-    for (const item of removed) deletedWebhookOrderCodes.add(item.orderCode.toUpperCase());
-    writeDeletedOrderCodes(deletedWebhookOrderCodes);
     webhookOrders = webhookOrders.filter((item) => item.id !== id && item.orderCode !== id);
     writePersistedOrders(webhookOrders);
     res.json({ ok: true });
   });
 
   // Server-side relay for external REST API routes on https://mido-web-site.vercel.app/api/external/*
-  app.post('/api/storefront/proxy', requireStorefrontAdmin, async (req: Request, res: Response) => {
+  app.post('/api/storefront/proxy', async (req: Request, res: Response) => {
     const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
     const rawWebsiteUrl = String(body.websiteUrl || 'https://mido-web-site.vercel.app').trim();
     const rawPath = String(body.path || '/api/external/orders').trim();
@@ -381,15 +238,7 @@ async function startServer() {
         res.status(400).json({ ok: false, error: 'Target host is not permitted' });
         return;
       }
-      if (!STOREFRONT_ALLOWED_HOSTS.has(base.hostname.toLowerCase())) {
-        res.status(400).json({ ok: false, error: 'Storefront host is not on the allowlist' });
-        return;
-      }
       targetUrl = new URL(rawPath, base.origin);
-      if (targetUrl.origin !== base.origin || !targetUrl.pathname.startsWith('/api/external/')) {
-        res.status(400).json({ ok: false, error: 'Proxy only allows /api/external/* endpoints' });
-        return;
-      }
     } catch {
       res.status(400).json({ ok: false, error: 'Invalid websiteUrl or endpoint path' });
       return;
@@ -410,17 +259,16 @@ async function startServer() {
       const upstream = await fetch(targetUrl.toString(), {
         method: rawMethod,
         headers,
-        redirect: 'manual',
         body:
           rawMethod === 'GET' || rawMethod === 'DELETE'
             ? undefined
             : JSON.stringify(body.payload ?? {}),
         signal: controller.signal,
       });
+      clearTimeout(timer);
 
       const contentType = upstream.headers.get('content-type') || '';
       const text = await upstream.text();
-      clearTimeout(timer);
       let parsed: unknown = null;
       if (contentType.includes('application/json')) {
         try {

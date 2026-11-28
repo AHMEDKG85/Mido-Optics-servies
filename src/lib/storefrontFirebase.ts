@@ -20,7 +20,6 @@ import {
   setDoc,
   updateDoc,
   where,
-  writeBatch,
   Firestore,
 } from 'firebase/firestore';
 import { WebOrder, WebOrderStatus, WebProduct } from '../types/optics';
@@ -149,44 +148,9 @@ export async function upsertStorefrontCatalogItem(
 
   const payload = mapWebProductToStorefrontProduct(product);
   const productRef = doc(storefrontDb, 'products', payload.slug);
-  const existingSnapshot = await getDoc(productRef);
-  const existingData = existingSnapshot.data() || {};
-  const previousVariants = Array.isArray(existingData.variants) ? existingData.variants as Array<Record<string, unknown>> : [];
-  const usedVariantIds = new Set<string>();
-  let nextVariantId = Math.max(0, ...previousVariants.map((variant) => Number(variant.id) || 0), ...payload.variants.map((variant) => variant.id)) + 1;
-  let inventoryNeedsReview = false;
-  const safeImages = (value: unknown) => Array.isArray(value) ? value.map((image) => String(image || '').trim()).filter((image) => (/^https:\/\//i.test(image) || /^\/(?!\/)/.test(image)) && image.length <= 1800) : [];
-  const mergedVariants = payload.variants.map((variant) => {
-    const colorName = variant.colorName.trim().toLocaleLowerCase();
-    const previous = previousVariants.find((candidate) => !usedVariantIds.has(String(candidate.id)) && String(candidate.colorName || '').trim().toLocaleLowerCase() === colorName);
-    if (!previous) {
-      inventoryNeedsReview = true;
-      usedVariantIds.add(String(nextVariantId));
-      return { ...variant, id: nextVariantId++, active: true, stock: 0, images: safeImages(variant.images) };
-    }
-    usedVariantIds.add(String(previous.id));
-    if (previous.active === false) inventoryNeedsReview = true;
-    const oldImages = safeImages(previous.images);
-    return {
-      ...variant,
-      id: Number(previous.id) || variant.id,
-      active: true,
-      stock: product.available ? Math.max(0, Number(previous.stock) || 0) : 0,
-      images: safeImages(variant.images).length ? safeImages(variant.images) : oldImages,
-      ...(Number(previous.price) > 0 ? { price: Number(previous.price) } : {}),
-      ...(previous.sku ? { sku: String(previous.sku).slice(0, 50) } : {}),
-      ...(previous.barcode ? { barcode: String(previous.barcode).slice(0, 50) } : {}),
-    };
-  });
-  const retiredVariants = previousVariants.filter((variant) => !usedVariantIds.has(String(variant.id))).map((variant) => variant.active === false ? variant : { ...variant, active: false, stock: 0 });
-  const mergedPayload = {
-    ...payload,
-    stockEstimate: existingSnapshot.exists() ? existingData.stockEstimate !== false || inventoryNeedsReview : true,
-    variants: [...mergedVariants, ...retiredVariants],
-  };
   try {
     await setDoc(productRef, {
-      ...mergedPayload,
+      ...payload,
       updatedAt: serverTimestamp(),
     });
     return { ok: true, target: 'products', docId: payload.slug };
@@ -195,8 +159,8 @@ export async function upsertStorefrontCatalogItem(
     const hasInlineImg = Boolean(product.photo && product.photo.startsWith('data:'));
     if (hasInlineImg) {
       await setDoc(productRef, {
-        ...mergedPayload,
-        variants: mergedPayload.variants.map((variant) => ({ ...variant, images: safeImages(variant.images) })),
+        ...payload,
+        variants: payload.variants.map((v) => ({ ...v, images: [] })),
         updatedAt: serverTimestamp(),
       });
       return {
@@ -235,63 +199,6 @@ export async function updateStorefrontOrderStatus(
     updatedAt: serverTimestamp(),
   });
   return true;
-}
-
-function normalizeDeletedOrderCode(value: unknown): string {
-  return String(value || '').trim().toUpperCase().slice(0, 64);
-}
-
-export async function fetchStorefrontDeletedOrderCodes(): Promise<string[]> {
-  if (!storefrontAuth.currentUser) {
-    throw new Error('قم بتسجيل الدخول لإدارة المتجر لمزامنة الطلبات المحذوفة');
-  }
-  const snapshot = await getDocs(collection(storefrontDb, 'deleted_order_codes'));
-  return snapshot.docs
-    .map((item) => normalizeDeletedOrderCode(item.data().orderCode || item.id))
-    .filter(Boolean);
-}
-
-export async function saveStorefrontDeletedOrderCodes(orderCodes: string[]): Promise<void> {
-  if (!storefrontAuth.currentUser) {
-    throw new Error('قم بتسجيل الدخول لإدارة المتجر لحفظ الحذف على الموقع');
-  }
-  const codes = Array.from(new Set(orderCodes.map(normalizeDeletedOrderCode).filter(Boolean)));
-  for (let start = 0; start < codes.length; start += 400) {
-    const batch = writeBatch(storefrontDb);
-    for (const orderCode of codes.slice(start, start + 400)) {
-      batch.set(doc(storefrontDb, 'deleted_order_codes', orderCode), {
-        orderCode,
-        deletedAt: serverTimestamp(),
-      });
-    }
-    await batch.commit();
-  }
-}
-
-export async function deleteStorefrontOrder(orderCode: string): Promise<void> {
-  if (!storefrontAuth.currentUser) return;
-  const normalizedCode = normalizeDeletedOrderCode(orderCode);
-  if (!normalizedCode) return;
-  await saveStorefrontDeletedOrderCodes([normalizedCode]);
-  const docId = `ord-${buildStorefrontSlug(normalizedCode, 'ord')}`;
-  await deleteDoc(doc(storefrontDb, 'orders', docId));
-}
-
-export function subscribeStorefrontDeletedOrderCodes(
-  onCodes: (codes: string[]) => void,
-  onError: (error: Error) => void
-): () => void {
-  return onSnapshot(
-    collection(storefrontDb, 'deleted_order_codes'),
-    (snapshot) => {
-      onCodes(
-        snapshot.docs
-          .map((item) => normalizeDeletedOrderCode(item.data().orderCode || item.id))
-          .filter(Boolean)
-      );
-    },
-    onError
-  );
 }
 
 export function subscribeStorefrontOrders(
