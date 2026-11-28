@@ -83,9 +83,11 @@ function dateTimeLocalValue(value?: { toMillis?: () => number }) {
 }
 
 function useShopRoute() {
-  const [route, setRoute] = useState(() => ({ view: (new URLSearchParams(location.search).get('view') || (location.pathname === '/shop-admin' ? 'admin' : location.pathname === '/shop/offers' ? 'offers' : 'home')) as View, product: new URLSearchParams(location.search).get('product') || '' }));
+  const basePath = location.pathname.match(/^\/MidoOpticWeb(?=\/|$)/)?.[0] || '';
+  const cleanPath = () => location.pathname.replace(/^\/MidoOpticWeb(?=\/|$)/, '') || '/';
+  const [route, setRoute] = useState(() => ({ view: (new URLSearchParams(location.search).get('view') || (cleanPath() === '/shop-admin' ? 'admin' : cleanPath() === '/shop/offers' ? 'offers' : 'home')) as View, product: new URLSearchParams(location.search).get('product') || '' }));
   useEffect(() => {
-    const update = () => setRoute({ view: (new URLSearchParams(location.search).get('view') || (location.pathname === '/shop-admin' ? 'admin' : location.pathname === '/shop/offers' ? 'offers' : 'home')) as View, product: new URLSearchParams(location.search).get('product') || '' });
+    const update = () => setRoute({ view: (new URLSearchParams(location.search).get('view') || (cleanPath() === '/shop-admin' ? 'admin' : cleanPath() === '/shop/offers' ? 'offers' : 'home')) as View, product: new URLSearchParams(location.search).get('product') || '' });
     window.addEventListener('popstate', update);
     return () => window.removeEventListener('popstate', update);
   }, []);
@@ -94,7 +96,7 @@ function useShopRoute() {
     const params = new URLSearchParams();
     if (view !== 'home' && !admin) params.set('view', view);
     if (product) params.set('product', product);
-    const path = admin ? '/shop-admin' : '/shop';
+    const path = `${basePath}${admin ? '/shop-admin' : view === 'home' ? '/' : '/shop'}`;
     const suffix = params.size ? `?${params.toString()}` : '';
     history.pushState({}, '', `${path}${suffix}`);
     setRoute({ view, product });
