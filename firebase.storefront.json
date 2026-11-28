@@ -1,0 +1,19 @@
+{
+  "functions": [{ "source": "functions", "codebase": "storefront", "predeploy": ["npm --prefix functions run build"] }],
+  "firestore": [
+    {
+      "database": "ai-studio-midooptics-b2b8b67a-82b2-4742-970e-5fe3b0f6abca",
+      "rules": "storefront.firestore.rules",
+      "indexes": "storefront.firestore.indexes.json"
+    }
+  ],
+  "storage": { "rules": "storefront.storage.rules" },
+  "emulators": {
+    "auth": { "port": 9099 },
+    "functions": { "port": 5001 },
+    "firestore": { "port": 8080 },
+    "storage": { "port": 9199 },
+    "ui": { "enabled": true, "port": 4000 },
+    "singleProjectMode": true
+  }
+}

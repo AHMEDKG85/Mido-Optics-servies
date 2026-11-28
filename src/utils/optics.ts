@@ -1763,6 +1763,10 @@ export function normalizeWebProduct(raw: unknown): WebProduct | null {
     name,
     category: normalizeWebProductCategory(obj.category),
     price: clampNumber(obj.price),
+    ...(typeof obj.brand === 'string' && obj.brand.trim() ? { brand: obj.brand.trim().slice(0, 100) } : {}),
+    ...(Number(obj.discountPrice) > 0 && Number(obj.discountPrice) < clampNumber(obj.price) ? { discountPrice: clampNumber(obj.discountPrice) } : {}),
+    featured: obj.featured === true,
+    newArrival: obj.newArrival === true,
     colors: sanitizeProductColors(obj.colors),
     available: typeof obj.available === 'boolean' ? obj.available : true,
     notes: String(obj.notes ?? '').trim().slice(0, 240),
@@ -1855,16 +1859,22 @@ export interface StorefrontProductPayload {
   name: string;
   category: StorefrontProductCategory;
   price: number;
+  brand?: string;
+  discountPrice?: number;
+  featured?: boolean;
+  newArrival?: boolean;
   shortDesc: string;
   fullDesc: string;
   frameShape: string;
   material: string;
   dimensions: string;
   published: boolean;
+  stockEstimate?: boolean;
   allowPreorder: boolean;
   preorderNote: string;
   variants: Array<{
     id: number;
+    active?: boolean;
     colorName: string;
     colorHex: string;
     stock: number;
@@ -1910,23 +1920,30 @@ export function mapWebProductToStorefrontProduct(
   const numericId = buildStorefrontStableNumericId(product.id);
   const activeColors = product.colors.length > 0 ? product.colors : ['أساسي'];
   const stockPerVariant = product.available ? 10 : 0;
-  const images = product.photo ? [product.photo] : [];
+  const safePhoto = product.photo && (/^https:\/\//i.test(product.photo) || /^\/(?!\/)/.test(product.photo)) ? product.photo : '';
+  const images = safePhoto ? [safePhoto] : [];
 
   return {
     slug,
     name: product.name.slice(0, 140),
     category: mapWebProductCategoryToStorefront(product.category),
     price: clampNumber(product.price),
+    ...(product.brand?.trim() ? { brand: product.brand.trim().slice(0, 100) } : {}),
+    ...(Number(product.discountPrice) > 0 && Number(product.discountPrice) < product.price ? { discountPrice: clampNumber(product.discountPrice) } : {}),
+    featured: product.featured === true,
+    newArrival: product.newArrival === true,
     shortDesc: (product.notes || WEB_PRODUCT_CATEGORY_LABELS[product.category]).slice(0, 320),
     fullDesc: (product.notes || product.name).slice(0, 2000),
     frameShape: 'classic',
     material: '',
     dimensions: '',
     published: true,
+    stockEstimate: true,
     allowPreorder: false,
     preorderNote: product.available ? '' : 'غير متوفرة حالياً',
     variants: activeColors.slice(0, 15).map((colorName, idx) => ({
       id: numericId * 100 + idx + 1,
+      active: true,
       colorName,
       colorHex: resolveColorHex(colorName),
       stock: stockPerVariant,
@@ -1941,13 +1958,11 @@ export function mapWebProductToStorefrontLens(
 ): StorefrontLensPayload {
   const numericId = buildStorefrontStableNumericId(product.id);
   const safeRemoteImg =
-    product.photo && product.photo.startsWith('data:image/') && product.photo.length <= 350_000
-      ? product.photo
-      : product.photo && /^https?:\/\//i.test(product.photo) && product.photo.length <= 500
+    product.photo && /^https?:\/\//i.test(product.photo) && product.photo.length <= 500
       ? product.photo
       : product.photo && product.photo.startsWith('/') && product.photo.length <= 500
       ? product.photo
-      : '/src/assets/images/optical_lens_crystal_1795761233547.jpg';
+      : '';
   const noteParts = product.notes
     ? product.notes
         .split(/[،,|•\n]+/)
@@ -1983,6 +1998,10 @@ export function normalizeWebOrderStatus(raw: unknown): WebOrderStatus {
   ) {
     return val;
   }
+  if (val === 'new' || val === 'awaiting_payment' || val === 'payment_verification') return 'pending';
+  if (val === 'processing') return 'preparing';
+  if (val === 'ready_for_pickup') return 'ready';
+  if (val === 'refunded') return 'cancelled';
   return 'pending';
 }
 

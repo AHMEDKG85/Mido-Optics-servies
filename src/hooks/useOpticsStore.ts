@@ -427,6 +427,10 @@ export interface WebProductInput {
   name: string;
   category: WebProductCategory;
   price: number;
+  brand?: string;
+  discountPrice?: number;
+  featured?: boolean;
+  newArrival?: boolean;
   colors: string[];
   available: boolean;
   notes?: string;
@@ -2387,6 +2391,10 @@ export function useOpticsStore() {
             name: input.name.trim().slice(0, 120),
             category: normalizeWebProductCategory(input.category),
             price: clampNumber(input.price),
+            brand: (input.brand || '').trim().slice(0, 100),
+            discountPrice: input.discountPrice && input.discountPrice > 0 ? clampNumber(input.discountPrice) : undefined,
+            featured: Boolean(input.featured),
+            newArrival: Boolean(input.newArrival),
             colors: sanitizeProductColors(input.colors),
             available: Boolean(input.available),
             notes: (input.notes || '').trim().slice(0, 240),
@@ -2399,6 +2407,10 @@ export function useOpticsStore() {
             name: input.name.trim().slice(0, 120),
             category: normalizeWebProductCategory(input.category),
             price: clampNumber(input.price),
+            brand: (input.brand || '').trim().slice(0, 100),
+            discountPrice: input.discountPrice && input.discountPrice > 0 ? clampNumber(input.discountPrice) : undefined,
+            featured: Boolean(input.featured),
+            newArrival: Boolean(input.newArrival),
             colors: sanitizeProductColors(input.colors),
             available: Boolean(input.available),
             notes: (input.notes || '').trim().slice(0, 240),

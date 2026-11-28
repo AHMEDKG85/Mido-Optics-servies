@@ -1,0 +1,16 @@
+{
+  "name": "mido-optics-storefront-functions",
+  "private": true,
+  "main": "lib/index.js",
+  "engines": { "node": "22" },
+  "scripts": {
+    "build": "tsc",
+    "lint": "tsc --noEmit",
+    "admin:claim": "node lib/admin-claims.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^14.5.1",
+    "firebase-functions": "^7.4.0"
+  },
+  "devDependencies": { "typescript": "^5.7.0" }
+}

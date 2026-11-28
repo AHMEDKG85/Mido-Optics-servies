@@ -149,9 +149,44 @@ export async function upsertStorefrontCatalogItem(
 
   const payload = mapWebProductToStorefrontProduct(product);
   const productRef = doc(storefrontDb, 'products', payload.slug);
+  const existingSnapshot = await getDoc(productRef);
+  const existingData = existingSnapshot.data() || {};
+  const previousVariants = Array.isArray(existingData.variants) ? existingData.variants as Array<Record<string, unknown>> : [];
+  const usedVariantIds = new Set<string>();
+  let nextVariantId = Math.max(0, ...previousVariants.map((variant) => Number(variant.id) || 0), ...payload.variants.map((variant) => variant.id)) + 1;
+  let inventoryNeedsReview = false;
+  const safeImages = (value: unknown) => Array.isArray(value) ? value.map((image) => String(image || '').trim()).filter((image) => (/^https:\/\//i.test(image) || /^\/(?!\/)/.test(image)) && image.length <= 1800) : [];
+  const mergedVariants = payload.variants.map((variant) => {
+    const colorName = variant.colorName.trim().toLocaleLowerCase();
+    const previous = previousVariants.find((candidate) => !usedVariantIds.has(String(candidate.id)) && String(candidate.colorName || '').trim().toLocaleLowerCase() === colorName);
+    if (!previous) {
+      inventoryNeedsReview = true;
+      usedVariantIds.add(String(nextVariantId));
+      return { ...variant, id: nextVariantId++, active: true, stock: 0, images: safeImages(variant.images) };
+    }
+    usedVariantIds.add(String(previous.id));
+    if (previous.active === false) inventoryNeedsReview = true;
+    const oldImages = safeImages(previous.images);
+    return {
+      ...variant,
+      id: Number(previous.id) || variant.id,
+      active: true,
+      stock: product.available ? Math.max(0, Number(previous.stock) || 0) : 0,
+      images: safeImages(variant.images).length ? safeImages(variant.images) : oldImages,
+      ...(Number(previous.price) > 0 ? { price: Number(previous.price) } : {}),
+      ...(previous.sku ? { sku: String(previous.sku).slice(0, 50) } : {}),
+      ...(previous.barcode ? { barcode: String(previous.barcode).slice(0, 50) } : {}),
+    };
+  });
+  const retiredVariants = previousVariants.filter((variant) => !usedVariantIds.has(String(variant.id))).map((variant) => variant.active === false ? variant : { ...variant, active: false, stock: 0 });
+  const mergedPayload = {
+    ...payload,
+    stockEstimate: existingSnapshot.exists() ? existingData.stockEstimate !== false || inventoryNeedsReview : true,
+    variants: [...mergedVariants, ...retiredVariants],
+  };
   try {
     await setDoc(productRef, {
-      ...payload,
+      ...mergedPayload,
       updatedAt: serverTimestamp(),
     });
     return { ok: true, target: 'products', docId: payload.slug };
@@ -160,8 +195,8 @@ export async function upsertStorefrontCatalogItem(
     const hasInlineImg = Boolean(product.photo && product.photo.startsWith('data:'));
     if (hasInlineImg) {
       await setDoc(productRef, {
-        ...payload,
-        variants: payload.variants.map((v) => ({ ...v, images: [] })),
+        ...mergedPayload,
+        variants: mergedPayload.variants.map((variant) => ({ ...variant, images: safeImages(variant.images) })),
         updatedAt: serverTimestamp(),
       });
       return {
