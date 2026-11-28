@@ -848,6 +848,10 @@ test('mapWebProductToStorefrontProduct and mapWebProductToStorefrontLens produce
     name: 'نظارة تيتانيوم دائرية',
     category: 'medical_glasses',
     price: 1350,
+    brand: 'MIDO',
+    discountPrice: 1190,
+    featured: true,
+    newArrival: true,
     colors: ['أسود', 'ذهبي'],
     available: false,
     notes: 'إطار خفيف الوزن',
@@ -860,6 +864,11 @@ test('mapWebProductToStorefrontProduct and mapWebProductToStorefrontLens produce
   assert.equal(mappedProd.category, 'prescription');
   assert.equal(mappedProd.slug, buildStorefrontSlug('wp_176400_med1'));
   assert.equal(mappedProd.published, true);
+  assert.equal(mappedProd.brand, 'MIDO');
+  assert.equal(mappedProd.discountPrice, 1190);
+  assert.equal(mappedProd.featured, true);
+  assert.equal(mappedProd.newArrival, true);
+  assert.equal(mappedProd.stockEstimate, true);
   assert.equal(mappedProd.allowPreorder, false);
   assert.equal(mappedProd.variants.length, 2);
   assert.equal(mappedProd.variants[0].stock, 0);
